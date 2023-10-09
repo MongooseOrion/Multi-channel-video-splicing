@@ -20,7 +20,7 @@
 * the respective OPEN-SOURCE licenses. 
 * 
 * THIS CODE IS PROVIDED BY https://github.com/MongooseOrion. 
-* FILE ENCODER TYPE: GBK
+* FILE ENCODER TYPE: GB2312
 * ========================================================================
 */
 // 图像缩放
@@ -32,32 +32,64 @@ module image_scale#(
     input           clk,
     input           rst,
     input  [7:0]    command_in,
-    output [15:0]   rd_addr,      //读地址
+    output [15:0]   rd_addr,  
     input  [15:0]   data_in, 
-    input  [9:0]    row_end_flag,   
-    input  [9:0]    frame_end_flag,    
     
-    output [15:0]   data_out      //缩放后的数据输出，在其它模块信号同步打拍
+    output [15:0]   data_out
 );
 
-parameter COL_OFFSET = ;    //显示起始行坐标
-parameter IMG_y=68;
+parameter WIDTH_OFFSET = 'd160;        // 决定实际的初始显示位置在何处
+parameter HEIHT_OFFSET = 'd180;
 
-wire     [8:0]    cnt_col;            //图片显示区域的行计数
-wire     [8:0]    cnt_row;            //图片显示区域的场计数
-reg      [8:0]    zoom_In_x;          //放大后的坐标映射
-reg      [8:0]    zoom_In_y;
-wire     [8:0]    zoom_x;             //最终缩放后坐标映射
-wire     [8:0]    zoom_y;
-wire    display_value;                //图像有效显示区域
+reg [9:0]       pix_count;        
+reg [9:0]       href_count;      
+reg [3:0]       zoom_in_value;
+reg [3:0]       zoom_out_value;
+reg [8:0]       zoom_in_x;            // 放大后的坐标映射
+reg [8:0]       zoom_in_y;
 
-assign cnt_col = hcount >= IMG_x ? hcount-IMG_x : 0;    
-assign cnt_row = vcount >= IMG_y ? vcount-IMG_y : 0;    
+wire [8:0]      zoom_x;               // 最终缩放后坐标映射
+wire [8:0]      zoom_y;
+wire            display_value;        // 图像有效显示区域
 
-//=======================放大坐标映射==============================        
-//偏移量公式：+ [side*(n-1)/2]，n为放大倍数  side为图像的宽、高
+
+// 控制命令
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        zoom_in_value <= 'b0;
+        zoom_out_value <= 'b0;
+    end
+    else if(command_in[7:4] == 4'b0000) begin
+        zoom_in_value <= command_in[3:0];
+        zoom_out_value <= zoom_out_value;
+    end
+    else if(command_in[7:4] == 4'b0001) begin
+        zoom_in_value <= zoom_in_value;
+        zoom_out_value <= command_in[3:0];
+    end
+    else begin
+        zoom_in_value <= zoom_in_value;
+        zoom_out_value <= zoom_out_value;
+    end
+end
+
+
+/*assign cnt_col = hcount >= IMG_x ? hcount-IMG_x : 0;    
+assign cnt_row = vcount >= IMG_y ? vcount-IMG_y : 0;    */
+// 像素计数
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        href_count <= 'b0;
+    end
+    else if()
+end
+
+
+
+// 放大坐标映射       
+// 偏移量公式：+ [side*(n-1)/2]，n为放大倍数  side为图像的宽、高
 always @(*) begin
-    case(Zoom_In)
+    case(zoom_in_value)
         2'b00   : begin                                     //原图
                     zoom_In_x = cnt_col;
                     zoom_In_y = cnt_row;
@@ -82,10 +114,10 @@ always @(*) begin
 end
 
 
-//-------------------缩小坐标映射--------------------------------
+// 缩小坐标映射
 //直接利用移位来达到缩小倍数的需求。串接在放大映射坐标后，可以在实现分辨率下采样（减小）的局部放大
-assign zoom_x = zoom_In_x << Zoom_Out;
-assign zoom_y = zoom_In_y << Zoom_Out;
+assign zoom_x = zoom_In_x << zoom_out_value;
+assign zoom_y = zoom_In_y << zoom_out_value;
 
 //---------------------------------------------------
 //由于缩小会使分辨率减小，原显示区域会出现缩小倍数^2的图像阵列，所以只显示左上角第一个缩小图像
