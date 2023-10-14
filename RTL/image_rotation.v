@@ -5,7 +5,7 @@
 * The following code snippet may contain portions that are derived from
 * OPEN-SOURCE communities, and these portions will be licensed with: 
 *
-* <NULL>
+* <GNU General Public License v3.0>
 *
 * If there is no OPEN-SOURCE licenses are listed, it indicates none of
 * content in this Code document is sourced from OPEN-SOURCE communities. 
@@ -20,124 +20,406 @@
 * the respective OPEN-SOURCE licenses. 
 * 
 * THIS CODE IS PROVIDED BY https://github.com/MongooseOrion. 
-* FILE ENCODER TYPE: GB2312
+* FILE ENCODER TYPE: GBK
 * ========================================================================
 */
-// 画面旋转
-//
-module image_rotation#(
-    parameter COL_PIXEL = 'd1280,       // 列像素
-    parameter ROW_PIXEL = 'd720         // 行像素
+// 图像旋转模块
+
+module image_rotation #(
+	parameter MEM_DATA_BITS = 64,
+	parameter ADDR_BITS = 32
 )(
-    input               clk,
-    input               rst,
-    input  [7:0]        command_in,
-    input  [15:0]       data_in,        //RGB565数据输入
-    input  [10:0]       row_end_flag,            //LCD显示的行计数
-    input  [10:0]       frame_end_flag,            //场计数
-    output [15:0]       rd_addr,        //生成的读RAM地址
-    output [15:0]       data_out        //显示的数据
+	input rst,                                 /*复位*/
+	input mem_clk,                               /*接口时钟*/
+    input     [2:0]          key_out,   	
+    output reg rd_burst_req,                          /*读请求*/
+	output reg wr_burst_req,                          /*写请求*/
+	output reg[9:0] rd_burst_len,                     /*读数据长度*/
+	output reg[9:0] wr_burst_len,                     /*写数据长度*/
+	output reg[ADDR_BITS - 1:0] rd_burst_addr,        /*读首地址*/
+	output reg[ADDR_BITS - 1:0] wr_burst_addr,        /*写首地址*/
+	input rd_burst_data_valid,                  /*读出数据有效*/
+	input wr_burst_data_req,                    /*写数据信号*/
+	input[MEM_DATA_BITS - 1:0] rd_burst_data,   /*读出的数据*/
+	output[MEM_DATA_BITS - 1:0] wr_burst_data,    /*写入的数据*/
+	input rd_burst_finish,                      /*读完成*/
+	input wr_burst_finish,                      /*写完成*/
+	output	reg			image_addr_flag,
+    output reg		[4:0]	display_model,
+    output reg		[15:0]	display_number,
+	output reg		[10:0]   threshold,
+	output reg error
+);
+parameter IDLE = 3'd0;
+parameter MEM_READ = 3'd1;
+parameter MEM_WRITE  = 3'd2;
+parameter BURST_LEN = 1;
+
+
+reg[2:0] state;
+reg[7:0] wr_cnt;
+reg[MEM_DATA_BITS - 1:0] wr_burst_data_reg;
+reg	[15:0]				wr_burst_data_reg_add;
+assign wr_burst_data = wr_burst_data_reg;
+reg[7:0] rd_cnt;
+reg[31:0] write_read_len;
+
+reg	[10:0]	time_cnt;
+
+
+wire		[12:0]	x_rotate;
+wire		[12:0]	y_rotate;
+reg					i_en;
+wire				o_en;
+
+reg		[10:0]	angle_temp;
+reg		[10:0]	x_shift_cnt;
+reg		[10:0]	y_shift_cnt;
+reg   	[3:0]	Scaling_Ratio;
+reg		[10:0]	angle;
+
+wire    [12:0]  x_cnt    =    write_read_len[9:0]; 
+wire    [12:0]  y_cnt    =    write_read_len[31:10];
+
+
+reg	[31:0]	wr_burst_addr_start;
+reg	[31:0]	rd_burst_addr_start;
+
+parameter	MAX_X	=	256*4;
+parameter	MAX_Y	=	768;
+
+
+always@(posedge mem_clk or posedge rst)
+begin
+	if(rst)
+		time_cnt	<=	'b0;
+	else if( state == IDLE )
+		time_cnt	<=	time_cnt	+	1'b1;
+	else
+		time_cnt	<=	'b0;
+end
+
+parameter	[31:0]	IMAGE_SIZE	=	32'hc0000;
+
+always@(posedge mem_clk or posedge rst)
+begin
+	if(rst)
+		wr_burst_data_reg_add	<=	16'h1111;
+    else if( wr_burst_data_reg_add	>=	16'hefff)
+        wr_burst_data_reg_add	<=	16'h1111;
+	else if(   (write_read_len == IMAGE_SIZE ))
+		wr_burst_data_reg_add	<=	wr_burst_data_reg_add	+	16'h1111;
+end
+
+
+
+always@(posedge mem_clk or posedge rst)
+begin
+	if(rst)
+		wr_burst_data_reg <= 64'b0;
+		
+	else if( x_cnt == 1024/Scaling_Ratio  ||  y_cnt == 768/Scaling_Ratio  )	
+		wr_burst_data_reg	<=    {4{wr_burst_data_reg_add}};
+
+    else if( ( x_cnt == 1024/2  ||  y_cnt == 768/2 ) && display_model == 1 )	
+		wr_burst_data_reg	<=    {4{wr_burst_data_reg_add}};
+		
+//	else if( x_cnt == 50 || x_cnt == 250|| x_cnt == 500|| x_cnt == 750 || x_cnt == 1000 )
+//		wr_burst_data_reg	<=    {4{wr_burst_data_reg_add}};
+//	else if( y_cnt == 300 || y_cnt == 100 || y_cnt == 500 || y_cnt == 700 )
+//		wr_burst_data_reg	<=    {4{wr_burst_data_reg_add}};
+
+	else if( y_cnt >= ( MAX_Y/Scaling_Ratio )|| x_cnt >=( MAX_X/Scaling_Ratio ) )	
+		wr_burst_data_reg <= 64'b0;
+
+	else if( x_cnt < x_shift_cnt || y_cnt < y_shift_cnt)	
+		wr_burst_data_reg <= 64'b0;	
+  	
+	else if( x_rotate > 1024 || y_rotate >= 768 )
+		wr_burst_data_reg <= 64'hdddd;
+
+	else if(state == MEM_READ && rd_burst_data_valid )
+		wr_burst_data_reg <= rd_burst_data;
+end
+
+
+always@(posedge mem_clk or posedge rst)
+begin
+	if(rst)
+		display_model	<=	0;
+	else if( display_model == 8 )
+		display_model	<=	'b0;
+    else if( key_out[0] )
+		display_model	<=	display_model	+	5'd1;	
+end
+
+always@(posedge mem_clk or posedge rst)
+begin
+	if(rst)
+		angle_temp	<=	9'b0;
+	else if( angle_temp == 0 && key_out[1] )
+        angle_temp	<=	360;
+    else if( angle_temp == 360 && key_out[2] )
+		angle_temp	<=	9'b0;
+	else if( display_model != 1 )
+		angle_temp	<=	16'b0;
+    else if( key_out[2]  && display_model == 1)
+		angle_temp	<=	angle_temp	+	16'd1;	
+	else if( key_out[1]  && display_model == 1)
+		angle_temp	<=	angle_temp	-	16'd1;	
+end
+
+always@(posedge mem_clk or posedge rst)
+begin
+	if(rst)
+		x_shift_cnt	<=	0;
+	else if( x_shift_cnt == 0 && key_out[1] )
+		x_shift_cnt	<=	1024;
+	else if( x_shift_cnt == 1024 && key_out[2] )
+		x_shift_cnt	<=	0;	
+	
+	else if( display_model != 2 )
+		x_shift_cnt	<=	11'b0;		
+    else if( key_out[2] && display_model == 2 )
+		x_shift_cnt	<=	x_shift_cnt	+	11'd5;	
+	else if( key_out[1] && display_model == 2 )
+		x_shift_cnt	<=	x_shift_cnt	-	11'd5;
+end
+
+always@(posedge mem_clk or posedge rst)
+begin
+	if(rst)
+		y_shift_cnt	<=	0;
+		
+		
+	else if( y_shift_cnt == 0 && key_out[1] )
+		y_shift_cnt	<=	768;
+	else if( y_shift_cnt == 768 && key_out[2] )
+		y_shift_cnt	<=	0;	
+		
+		
+	else if( display_model != 3 )
+		y_shift_cnt	<=	11'b0;		
+    else if( key_out[2] && display_model == 3 )
+		y_shift_cnt	<=	y_shift_cnt	+	11'd5;	
+	else if( key_out[1] && display_model == 3 )
+		y_shift_cnt	<=	y_shift_cnt	-	11'd5;
+end
+
+
+always@(posedge mem_clk or posedge rst)
+begin
+	if(rst)
+		Scaling_Ratio	<=	1;
+	else if( Scaling_Ratio == 1 && key_out[1])
+		Scaling_Ratio	<=	6;
+    else if( Scaling_Ratio == 6 && key_out[2])
+		Scaling_Ratio	<=	1;
+	
+    else if( display_model != 4 )		
+		Scaling_Ratio	<=	11'b1;
+    else if( key_out[2] && display_model == 4)
+		Scaling_Ratio	<=	Scaling_Ratio	+	11'd1;	
+	else if( key_out[1] && display_model == 4)
+		Scaling_Ratio	<=	Scaling_Ratio	-	11'd1;
+end
+
+
+always@(posedge mem_clk or posedge rst)
+begin
+	if(rst)
+		threshold	<=	10;
+	else if( threshold == 10 && key_out[1])
+		threshold	<=	250;
+    else if( threshold >= 250 && key_out[2])
+		threshold	<=	10;
+	
+    else if( display_model != 6 )		
+		threshold	<=	10;
+    else if( key_out[2] && display_model == 6)
+		threshold	<=	threshold	+	11'd5;	
+	else if( key_out[1] && display_model == 6)
+		threshold	<=	threshold	-	11'd5;
+end
+
+
+always@(posedge mem_clk or posedge rst)
+begin
+	if(rst)
+		rd_burst_addr 		<='h000000;
+	else if( write_read_len == IMAGE_SIZE )
+		rd_burst_addr 		<='h000000;
+	else case( display_model )
+		0	:	
+			rd_burst_addr 	<= 	rd_burst_addr_start	+	write_read_len;
+		1	:	
+			rd_burst_addr 	<= 	rd_burst_addr_start	+	x_rotate	+	1024*y_rotate;
+		2	:	
+			rd_burst_addr 	<= 	rd_burst_addr_start	+	x_cnt	+	1024*y_cnt    - x_shift_cnt ;	
+		3	:	
+			rd_burst_addr 	<= 	rd_burst_addr_start	+	x_cnt	+	1024*y_cnt    -   1024*y_shift_cnt;
+		4	:	
+			rd_burst_addr 	<= 	rd_burst_addr_start	+	Scaling_Ratio*x_cnt	+	Scaling_Ratio*1024*y_cnt;                
+		default:	
+			rd_burst_addr 	<= 	rd_burst_addr_start	+	write_read_len;	
+	
+	endcase
+end
+		
+always@(posedge mem_clk or posedge rst)
+begin
+	if(rst)
+		display_number 		<=0;
+	else case( display_model )
+		0	:	
+			display_number 	<= 0;
+		1	:	
+			display_number 	<= 	angle;
+		2	:	
+			display_number 	<= 	x_shift_cnt ;	
+		3	:	
+			display_number 	<= 	y_shift_cnt;
+		4	:	
+			display_number 	<=  Scaling_Ratio;
+        6    :    
+            display_number 	<=  threshold;
+		default:	
+			display_number 	<= 0;		
+	endcase
+end			
+
+
+coor_trans coor_trans_inst
+(
+    .clk		(	mem_clk			),
+    .rst_n		(	rst_n			),
+    
+    
+    .angle		(	angle			),
+    .x_in		(	x_cnt			),
+    .y_in		(	y_cnt			),
+   
+
+	.x_out		(	x_rotate		),
+    .y_out		(	y_rotate		)
 );
 
-wire          display_value;        //显示区域有效标志位
-wire [8:0]    cnt_col;    //显示区域图片的行坐标
-wire [8:0]    cnt_row;
-
-reg [3:0]     rotate_value;
-reg [3:0]     mirror_value;
-reg [10:0]    hcount;
-reg [2:0]     vcount;
-reg [8:0]     mirror_x;    // 镜像后的行坐标
-reg [8:0]     mirror_y;
-reg [8:0]     rotate_x;    // 旋转后的行坐标
-reg [8:0]     rotate_y;
 
 
-// 指令选择
-always @(posedge clk or negedge rst) begin
-    if(!rst) begin
-        rotate_value <= 'b0;
-        mirror_value <= 'b0;
-    end
-    else if(command_in[7:4] == 4'b0100) begin
-        rotate_value <= command_in[3:0];
-    end
-    else if(command_in[7:4] == 4'b0101) begin
-        mirror_value <= command_in[3:0];
-    end
-    else begin
-        rotate_value <= rotate_value;
-        mirror_value <= mirror_value;
-    end
+
+always@(posedge mem_clk or posedge rst)
+begin
+	if(rst)
+		wr_burst_addr_start	<=32'd6220800 ;
+	else if( image_addr_flag )					//image_addr_flag==1
+		wr_burst_addr_start	<=32'd4147200 ;
+	else	
+		wr_burst_addr_start	<=32'd6220800;		//image_addr_flag==0
 end
 
-//对于480*272显示面板，图片240*136要显示到正中央，对于90度旋转，显示区域的行场坐标需重新计算：
-/*assign cnt_col = (rotate_value==0||rotate_value==2) ? (hcount >= 120 ? hcount-120 : 0) : (hcount >= 172 ? hcount-172 : 0);
-assign cnt_row = (rotate_value==0||rotate_value==2) ? (vcount >= 68 ? vcount-68 : 0) : (vcount >= 16 ? vcount-16 : 0);    
-*/    
-
-
-// 旋转
-always @(*) begin
-    case(rotate_value)
-        2'b00   : begin                                     //原图
-                    rotate_x = cnt_col;
-                    rotate_y = cnt_row;
-                  end
-        2'b01   : begin                                     //右转90度，
-                    rotate_x = cnt_row;
-                    rotate_y = (ROW_PIXEL-1) - cnt_col;
-                  end
-        2'b10   : begin                                     //旋转180度，相当于原图水平、垂直镜像
-                    rotate_x = (COL_PIXEL-1) - cnt_col;
-                    rotate_y = (ROW_PIXEL-1) - cnt_row;
-                  end
-        2'b11   : begin                                     //左转90度（右转270度），右转90度后水平、垂直镜像
-                    rotate_x = (COL_PIXEL-1) - cnt_row;
-                    rotate_y = cnt_col;
-                  end
-        default : begin
-                    rotate_x = cnt_col;
-                    rotate_y = cnt_row;
-                  end
-    endcase
+always@(posedge mem_clk or posedge rst)
+begin
+	if(rst)
+		rd_burst_addr_start	<=32'd2073600;
+	else if( image_addr_flag )					//image_addr_flag==1
+		rd_burst_addr_start	<=32'd0  ;
+	else	
+		rd_burst_addr_start	<=32'd2073600;		//image_addr_flag==0
 end
 
 
-// 镜像
-always @(*) begin
-    case(mirror_value)
-        2'b00   : begin                                     //原图
-                    mirror_x = rotate_x;
-                    mirror_y = rotate_y;
-                  end
-        2'b01   : begin                                     //水平镜像
-                    mirror_x = (COL_PIXEL-1) - rotate_x;
-                    mirror_y = rotate_y;
-                  end
-        2'b10   : begin                                     //垂直镜像
-                    mirror_x = rotate_x;
-                    mirror_y = (ROW_PIXEL-1) - rotate_y;
-                  end
-        2'b11   : begin                                     //水平垂直镜像
-                    mirror_x = (COL_PIXEL-1) - rotate_x;
-                    mirror_y = (ROW_PIXEL-1) - rotate_y;
-                  end
-        default : begin
-                    mirror_x = rotate_x;
-                    mirror_y = rotate_y;
-                  end
-    endcase
+always@(posedge mem_clk or posedge rst)
+begin
+	if(rst)
+	begin
+        angle                <=    'b0;
+        state 				<= IDLE;
+		i_en				<=	1'b1;
+		image_addr_flag		<=	1'b0;
+		
+		wr_burst_req 		<= 1'b0;
+		rd_burst_req 		<= 1'b0;
+		
+		rd_burst_len 		<= BURST_LEN;
+		wr_burst_len 		<= BURST_LEN;
+		
+		wr_burst_addr 		<='h000000;
+//		rd_burst_addr 		<='h000000;
+		
+		write_read_len 		<= 32'd0;
+	end
+
+    else if( write_read_len == IMAGE_SIZE )
+        begin
+//           if( angle == 359 )                
+//               angle	<=	'b0;
+//           else
+//               angle	<=	angle	+	16'd1;  
+
+			angle	<=		angle_temp;
+
+			i_en			<=	1'b0;
+			state			<=	IDLE;
+            write_read_len	<= 	32'd0;
+			image_addr_flag	<=	~image_addr_flag;	
+			
+			wr_burst_req 	<=	1'b0;
+			rd_burst_req 	<=	1'b0;		
+		
+			wr_burst_addr 	<=	32'd2073600;
+//			rd_burst_addr 	<=	'h000000;
+			
+        end
+
+
+	else
+	begin
+		case(state)
+			IDLE:			
+
+//			if( time_cnt == 3  ) 
+			begin
+				i_en			<=	1'b0;
+				state 			<= 	MEM_READ;
+				rd_burst_req 	<= 	1'b1;									
+
+//				rd_burst_addr 	<= 	rd_burst_addr_start	+	write_read_len;					
+//				rd_burst_addr 	<= 	rd_burst_addr_start	+	x_cnt	+	256*y_cnt    - x_shift_cnt -   3*256*y_shift_cnt;					
+//				rd_burst_addr 	<= 	rd_burst_addr_start	+	Scaling_Ratio*x_cnt	+	Scaling_Ratio*256*y_cnt- x_shift_cnt -   3*256*y_shift_cnt;					
+//				rd_burst_addr 	<= 	rd_burst_addr_start	+	x_rotate	+	1024*y_rotate;
+
+					
+			end
+			
+			MEM_READ:
+			begin
+				if(rd_burst_finish)
+				begin
+					state 			<= 	MEM_WRITE;					
+					rd_burst_req 	<= 	1'b0;				
+					wr_burst_req 	<=	1'b1;
+					
+//					wr_burst_addr 	<= 	wr_burst_addr_start  +	write_read_len;					
+					wr_burst_addr 	<= 	wr_burst_addr_start  +	x_cnt	+	1024*y_cnt;
+				end
+			end
+			
+			MEM_WRITE:
+			begin
+				if(wr_burst_finish)
+				begin
+					state 			<=	IDLE;
+					wr_burst_req 	<=	1'b0;
+					write_read_len 	<= write_read_len +	1'b1;
+					i_en			<=	1'b1;
+				end
+			end
+
+			default:
+				state <= IDLE;
+		endcase
+	end
 end
 
-
-
-
-//rotate_value==0||rotate_value==2旋转时显示宽高对调，重新定义显示区域
-assign display_value =  (rotate_value==0||rotate_value==2) ? (hcount >= 120 && hcount < 360) && (vcount >= 68 && vcount < 204)
- : (hcount >= 172 && hcount < 308) && (vcount >= 16 && vcount < 256);            
-
-assign read_addr = mirror_y * COL_PIXEL + mirror_x;    //RAM中读取的像素地址
-assign data_out = display_value ? data_in : 0;    //显示区域外为黑
 
 endmodule

@@ -30,8 +30,8 @@ module video_sampling_1#(
     parameter RD_ADDR_LEN = 'd5,
     parameter IMAGE_TAG = 4'd1,
     parameter DQ_WIDTH = 12'd32,
-    parameter COLUMN_NUM = 'd1280,
-    parameter ROW_NUM = 'd720
+    parameter VIDEO_WIDTH = 'd1280,
+    parameter VIDEO_HEIGHT = 'd720
 )(
     input               clk,
     input               rst,
@@ -50,8 +50,8 @@ module video_sampling_1#(
     output reg                              frame_end_flag
 );
 
-parameter COLUMN_NUM_QD = COLUMN_NUM / 'd4;
-parameter ROW_NUM_QD = ROW_NUM / 'd4;
+parameter COLUMN_NUM_QD = VIDEO_WIDTH / 'd4;
+parameter ROW_NUM_QD = VIDEO_HEIGHT / 'd4;
 
 wire        pose_vs_in;
 wire        nege_vs_in;

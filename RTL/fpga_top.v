@@ -5,7 +5,7 @@
 * The following code snippet may contain portions that are derived from
 * OPEN-SOURCE communities, and these portions will be licensed with: 
 *
-* <NULL>
+* <GNU General Public License v3.0>
 *
 * If there is no OPEN-SOURCE licenses are listed, it indicates none of
 * content in this Code document is sourced from OPEN-SOURCE communities. 

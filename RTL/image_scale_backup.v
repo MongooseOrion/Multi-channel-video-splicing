@@ -77,14 +77,14 @@ end
 /*assign cnt_col = hcount >= IMG_x ? hcount-IMG_x : 0;    
 assign cnt_row = vcount >= IMG_y ? vcount-IMG_y : 0;    */
 // 像素计数
-always @(posedge clk or negedge rst) begin
+/*always @(posedge clk or negedge rst) begin
     if(!rst) begin
         href_count <= 'b0;
     end
     else if()
 end
 
-
+ 
 
 // 放大坐标映射       
 // 偏移量公式：+ [side*(n-1)/2]，n为放大倍数  side为图像的宽、高
@@ -125,5 +125,5 @@ assign display_value =  (hcount >= IMG_x && hcount < IMG_x+(COL>>Zoom_Out)) && (
 
 assign read_addr = zoom_y * COL + zoom_x;            //缩放映射后的 RAM 地址
 assign data_out = display_value ? data_in : 0;       //有效显示区域输出图像，无效背景为黑
-
+*/
 endmodule        
