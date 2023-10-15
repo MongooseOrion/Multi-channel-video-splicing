@@ -31,7 +31,7 @@ module video_sampling_2#(
     parameter IMAGE_TAG = 4'd5,
     parameter DQ_WIDTH = 12'd32,
     parameter VIDEO_WIDTH = 'd1280,
-    parameter VIDEO_HEIHT = 'd720
+    parameter VIDEO_HEIGHT = 'd720
 )(
     input           clk_in,
     input           rst,
@@ -50,7 +50,7 @@ module video_sampling_2#(
 );
 
 parameter COLUMN_NUM_QD = VIDEO_WIDTH / 'd4;
-parameter ROW_NUM_QD = VIDEO_HEIHT / 'd4;
+parameter ROW_NUM_QD = VIDEO_HEIGHT / 'd4;
 
 wire        pose_vs_in;
 wire        nege_vs_in;

@@ -26,47 +26,51 @@
 // 图像旋转模块
 
 module image_rotation #(
-	parameter MEM_DATA_BITS = 64,
-	parameter ADDR_BITS = 32
+	parameter MEM_DATA_LEN = 64,
+	parameter ADDR_LEN = 32,
+	parameter VIDEO_WIDTH	=	256*4,
+	parameter VIDEO_HEIGHT	=	768,
+    parameter BURST_LEN = 1
 )(
-	input rst,                                 /*复位*/
-	input mem_clk,                               /*接口时钟*/
-    input     [2:0]          key_out,   	
-    output reg rd_burst_req,                          /*读请求*/
-	output reg wr_burst_req,                          /*写请求*/
-	output reg[9:0] rd_burst_len,                     /*读数据长度*/
-	output reg[9:0] wr_burst_len,                     /*写数据长度*/
-	output reg[ADDR_BITS - 1:0] rd_burst_addr,        /*读首地址*/
-	output reg[ADDR_BITS - 1:0] wr_burst_addr,        /*写首地址*/
-	input rd_burst_data_valid,                  /*读出数据有效*/
-	input wr_burst_data_req,                    /*写数据信号*/
-	input[MEM_DATA_BITS - 1:0] rd_burst_data,   /*读出的数据*/
-	output[MEM_DATA_BITS - 1:0] wr_burst_data,    /*写入的数据*/
-	input rd_burst_finish,                      /*读完成*/
-	input wr_burst_finish,                      /*写完成*/
-	output	reg			image_addr_flag,
-    output reg		[4:0]	display_model,
-    output reg		[15:0]	display_number,
-	output reg		[10:0]   threshold,
-	output reg error
+	input 								rst,                                 /*复位*/
+	input 								mem_clk,                               /*接口时钟*/
+    input      	[2:0]          			key_out,   	
+    output reg 							rd_burst_req,                          /*读请求*/
+	output reg 							wr_burst_req,                          /*写请求*/
+	output reg 	[9:0] 					rd_burst_len,                     /*读数据长度*/
+	output reg 	[9:0] 					wr_burst_len,                     /*写数据长度*/
+	output reg 	[ADDR_LEN - 1:0]		rd_burst_addr,        /*读首地址*/
+	output reg 	[ADDR_LEN - 1:0] 		wr_burst_addr,        /*写首地址*/
+	input 								rd_burst_data_valid,                  /*读出数据有效*/
+	input 								wr_burst_data_req,                    /*写数据信号*/
+	input      	[MEM_DATA_LEN - 1:0]	rd_burst_data,   /*读出的数据*/
+	output		[MEM_DATA_LEN - 1:0] 	wr_burst_data,    /*写入的数据*/
+	input 								rd_burst_finish,                      /*读完成*/
+	input 								wr_burst_finish,                      /*写完成*/
+	output reg							image_addr_flag,
+    output reg	[4:0]					display_model,
+    output reg	[15:0]					display_number,
+	output reg	[10:0]   				threshold,
+	output reg 							error
 );
+
 parameter IDLE = 3'd0;
 parameter MEM_READ = 3'd1;
 parameter MEM_WRITE  = 3'd2;
-parameter BURST_LEN = 1;
+
 
 
 reg[2:0] state;
 reg[7:0] wr_cnt;
-reg[MEM_DATA_BITS - 1:0] wr_burst_data_reg;
+reg[MEM_DATA_LEN - 1:0] wr_burst_data_reg;
 reg	[15:0]				wr_burst_data_reg_add;
-assign wr_burst_data = wr_burst_data_reg;
+
 reg[7:0] rd_cnt;
 reg[31:0] write_read_len;
 
 reg	[10:0]	time_cnt;
 
-
+assign wr_burst_data = wr_burst_data_reg;
 wire		[12:0]	x_rotate;
 wire		[12:0]	y_rotate;
 reg					i_en;
@@ -84,9 +88,6 @@ wire    [12:0]  y_cnt    =    write_read_len[31:10];
 
 reg	[31:0]	wr_burst_addr_start;
 reg	[31:0]	rd_burst_addr_start;
-
-parameter	MAX_X	=	256*4;
-parameter	MAX_Y	=	768;
 
 
 always@(posedge mem_clk or posedge rst)
@@ -118,24 +119,19 @@ begin
 	if(rst)
 		wr_burst_data_reg <= 64'b0;
 		
-	else if( x_cnt == 1024/Scaling_Ratio  ||  y_cnt == 768/Scaling_Ratio  )	
+	else if( x_cnt == VIDEO_WIDTH/Scaling_Ratio  ||  y_cnt == VIDEO_HEIGHT/Scaling_Ratio  )	
 		wr_burst_data_reg	<=    {4{wr_burst_data_reg_add}};
 
-    else if( ( x_cnt == 1024/2  ||  y_cnt == 768/2 ) && display_model == 1 )	
+    else if( ( x_cnt == VIDEO_WIDTH/2  ||  y_cnt == VIDEO_HEIGHT/2 ) && display_model == 1 )	
 		wr_burst_data_reg	<=    {4{wr_burst_data_reg_add}};
-		
-//	else if( x_cnt == 50 || x_cnt == 250|| x_cnt == 500|| x_cnt == 750 || x_cnt == 1000 )
-//		wr_burst_data_reg	<=    {4{wr_burst_data_reg_add}};
-//	else if( y_cnt == 300 || y_cnt == 100 || y_cnt == 500 || y_cnt == 700 )
-//		wr_burst_data_reg	<=    {4{wr_burst_data_reg_add}};
 
-	else if( y_cnt >= ( MAX_Y/Scaling_Ratio )|| x_cnt >=( MAX_X/Scaling_Ratio ) )	
+	else if( y_cnt >= ( VIDEO_HEIGHT/Scaling_Ratio )|| x_cnt >=( VIDEO_WIDTH/Scaling_Ratio ) )	
 		wr_burst_data_reg <= 64'b0;
 
 	else if( x_cnt < x_shift_cnt || y_cnt < y_shift_cnt)	
 		wr_burst_data_reg <= 64'b0;	
   	
-	else if( x_rotate > 1024 || y_rotate >= 768 )
+	else if( x_rotate > VIDEO_WIDTH || y_rotate >= VIDEO_HEIGHT )
 		wr_burst_data_reg <= 64'hdddd;
 
 	else if(state == MEM_READ && rd_burst_data_valid )
@@ -174,8 +170,8 @@ begin
 	if(rst)
 		x_shift_cnt	<=	0;
 	else if( x_shift_cnt == 0 && key_out[1] )
-		x_shift_cnt	<=	1024;
-	else if( x_shift_cnt == 1024 && key_out[2] )
+		x_shift_cnt	<=	VIDEO_WIDTH;
+	else if( x_shift_cnt == VIDEO_WIDTH && key_out[2] )
 		x_shift_cnt	<=	0;	
 	
 	else if( display_model != 2 )
@@ -193,8 +189,8 @@ begin
 		
 		
 	else if( y_shift_cnt == 0 && key_out[1] )
-		y_shift_cnt	<=	768;
-	else if( y_shift_cnt == 768 && key_out[2] )
+		y_shift_cnt	<=	VIDEO_HEIGHT;
+	else if( y_shift_cnt == VIDEO_HEIGHT && key_out[2] )
 		y_shift_cnt	<=	0;	
 		
 		
@@ -253,13 +249,13 @@ begin
 		0	:	
 			rd_burst_addr 	<= 	rd_burst_addr_start	+	write_read_len;
 		1	:	
-			rd_burst_addr 	<= 	rd_burst_addr_start	+	x_rotate	+	1024*y_rotate;
+			rd_burst_addr 	<= 	rd_burst_addr_start	+	x_rotate	+	VIDEO_WIDTH*y_rotate;
 		2	:	
-			rd_burst_addr 	<= 	rd_burst_addr_start	+	x_cnt	+	1024*y_cnt    - x_shift_cnt ;	
+			rd_burst_addr 	<= 	rd_burst_addr_start	+	x_cnt	+	VIDEO_WIDTH*y_cnt    - x_shift_cnt ;	
 		3	:	
-			rd_burst_addr 	<= 	rd_burst_addr_start	+	x_cnt	+	1024*y_cnt    -   1024*y_shift_cnt;
+			rd_burst_addr 	<= 	rd_burst_addr_start	+	x_cnt	+	VIDEO_WIDTH*y_cnt    -   VIDEO_WIDTH*y_shift_cnt;
 		4	:	
-			rd_burst_addr 	<= 	rd_burst_addr_start	+	Scaling_Ratio*x_cnt	+	Scaling_Ratio*1024*y_cnt;                
+			rd_burst_addr 	<= 	rd_burst_addr_start	+	Scaling_Ratio*x_cnt	+	Scaling_Ratio*VIDEO_WIDTH*y_cnt;                
 		default:	
 			rd_burst_addr 	<= 	rd_burst_addr_start	+	write_read_len;	
 	
@@ -386,7 +382,7 @@ begin
 //				rd_burst_addr 	<= 	rd_burst_addr_start	+	write_read_len;					
 //				rd_burst_addr 	<= 	rd_burst_addr_start	+	x_cnt	+	256*y_cnt    - x_shift_cnt -   3*256*y_shift_cnt;					
 //				rd_burst_addr 	<= 	rd_burst_addr_start	+	Scaling_Ratio*x_cnt	+	Scaling_Ratio*256*y_cnt- x_shift_cnt -   3*256*y_shift_cnt;					
-//				rd_burst_addr 	<= 	rd_burst_addr_start	+	x_rotate	+	1024*y_rotate;
+//				rd_burst_addr 	<= 	rd_burst_addr_start	+	x_rotate	+	VIDEO_WIDTH*y_rotate;
 
 					
 			end
@@ -400,7 +396,7 @@ begin
 					wr_burst_req 	<=	1'b1;
 					
 //					wr_burst_addr 	<= 	wr_burst_addr_start  +	write_read_len;					
-					wr_burst_addr 	<= 	wr_burst_addr_start  +	x_cnt	+	1024*y_cnt;
+					wr_burst_addr 	<= 	wr_burst_addr_start  +	x_cnt	+	VIDEO_WIDTH*y_cnt;
 				end
 			end
 			
