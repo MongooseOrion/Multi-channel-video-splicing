@@ -26,268 +26,282 @@
 // 图像旋转模块
 
 module image_rotation #(
-	parameter MEM_DATA_LEN = 64,
-	parameter ADDR_LEN = 32,
-	parameter VIDEO_WIDTH	=	256*4,
-	parameter VIDEO_HEIGHT	=	768,
-    parameter BURST_LEN = 1
+    parameter MEM_DATA_LEN = 'd64,
+    parameter ADDR_LEN = 'd32,
+    parameter VIDEO_WIDTH =	'd1024,
+    parameter VIDEO_HEIGHT = 'd768,
+    parameter BURST_LEN = 'd1
 )(
-	input 								rst,                                 /*复位*/
-	input 								mem_clk,                               /*接口时钟*/
-    input      	[2:0]          			key_out,   	
-    output reg 							rd_burst_req,                          /*读请求*/
-	output reg 							wr_burst_req,                          /*写请求*/
-	output reg 	[9:0] 					rd_burst_len,                     /*读数据长度*/
-	output reg 	[9:0] 					wr_burst_len,                     /*写数据长度*/
-	output reg 	[ADDR_LEN - 1:0]		rd_burst_addr,        /*读首地址*/
-	output reg 	[ADDR_LEN - 1:0] 		wr_burst_addr,        /*写首地址*/
-	input 								rd_burst_data_valid,                  /*读出数据有效*/
-	input 								wr_burst_data_req,                    /*写数据信号*/
-	input      	[MEM_DATA_LEN - 1:0]	rd_burst_data,   /*读出的数据*/
-	output		[MEM_DATA_LEN - 1:0] 	wr_burst_data,    /*写入的数据*/
-	input 								rd_burst_finish,                      /*读完成*/
-	input 								wr_burst_finish,                      /*写完成*/
-	output reg							image_addr_flag,
-    output reg	[4:0]					display_model,
+    input 								rst,                  
+    input 								clk,                // mem_clk
+    input      	[2:0]          			key_out,
+    input       [7:0]                   command_in,   	
+    // 读通道
+    output reg 							rd_valid,           // 读请求
+    input 								rd_ready,           // 读数据准备
+    output reg 	[9:0] 					rd_burst_len,       // 读突发长度
+    output reg 	[ADDR_LEN-1'b1:0]		rd_addr,            // 读首地址
+    input      	[MEM_DATA_LEN-1'b1:0]	rd_data,            // 读出的数据
+    input 								rd_burst_finish,    // 读完成
+    // 写通道
+    output reg 							wr_valid,           // 写请求
+    input 								wr_ready,           // 写数据准备
+    output reg 	[9:0] 					wr_burst_len,       // 写数据长度
+    output reg 	[ADDR_LEN-1'b1:0] 		wr_addr,            // 写首地址
+    output		[MEM_DATA_LEN-1'b1:0] 	wr_data,            // 写入的数据
+    input 								wr_burst_finish,    // 写完成
+
+    output reg							image_addr_flag,
+    output reg	[4:0]					function_mode,
     output reg	[15:0]					display_number,
-	output reg	[10:0]   				threshold,
-	output reg 							error
+    output reg	[10:0]   				threshold,          // 二值化阈值
+    output reg 							error
 );
 
-parameter IDLE = 3'd0;
-parameter MEM_READ = 3'd1;
-parameter MEM_WRITE  = 3'd2;
+// 读写操作状态机参数
+parameter   IDLE = 3'd0,
+            MEM_READ = 3'd1,
+            MEM_WRITE = 3'd2;
+// 显示功能模式状态机参数
+parameter   DEFAULT_MODE = 5'd0,
+            ROTATE_MODE = 5'd1,
+            SHIFT_MODE_X = 5'd2,
+            SHIFT_MODE_Y = 5'd3,
+            SCALE_MODE = 5'd4;
 
+parameter IMAGE_SIZE = VIDEO_HEIGHT * VIDEO_WIDTH;
 
-
-reg[2:0] state;
-reg[7:0] wr_cnt;
-reg[MEM_DATA_LEN - 1:0] wr_burst_data_reg;
-reg	[15:0]				wr_burst_data_reg_add;
-
-reg[7:0] rd_cnt;
-reg[31:0] write_read_len;
-
-reg	[10:0]	time_cnt;
-
-assign wr_burst_data = wr_burst_data_reg;
-wire		[12:0]	x_rotate;
-wire		[12:0]	y_rotate;
-reg					i_en;
+wire [12:0]	        x_rotate;
+wire [12:0]	        y_rotate;
 wire				o_en;
+wire [12:0]         x_cnt; 
+wire [12:0]         y_cnt;
 
-reg		[10:0]	angle_temp;
-reg		[10:0]	x_shift_cnt;
-reg		[10:0]	y_shift_cnt;
-reg   	[3:0]	Scaling_Ratio;
-reg		[10:0]	angle;
+reg [2:0] 	     			state;
+reg [7:0] 					wr_cnt;
+reg [MEM_DATA_LEN - 1:0] 	wr_data_reg;
+reg	[15:0]					wr_data_border;
+reg [7:0] 					rd_cnt;
+reg [31:0] 					write_read_len;
+reg					        i_en;
+reg	[10:0]	                angle_temp;
+reg	[10:0]	                x_shift_cnt;
+reg	[10:0]	                y_shift_cnt;
+reg [3:0]	                scale_value;
+reg	[10:0]	                angle;
+reg	[31:0]	                wr_burst_addr_start;
+reg	[31:0]	                rd_burst_addr_start;
 
-wire    [12:0]  x_cnt    =    write_read_len[9:0]; 
-wire    [12:0]  y_cnt    =    write_read_len[31:10];
-
-
-reg	[31:0]	wr_burst_addr_start;
-reg	[31:0]	rd_burst_addr_start;
-
-
-always@(posedge mem_clk or posedge rst)
-begin
-	if(rst)
-		time_cnt	<=	'b0;
-	else if( state == IDLE )
-		time_cnt	<=	time_cnt	+	1'b1;
-	else
-		time_cnt	<=	'b0;
-end
-
-parameter	[31:0]	IMAGE_SIZE	=	32'hc0000;
-
-always@(posedge mem_clk or posedge rst)
-begin
-	if(rst)
-		wr_burst_data_reg_add	<=	16'h1111;
-    else if( wr_burst_data_reg_add	>=	16'hefff)
-        wr_burst_data_reg_add	<=	16'h1111;
-	else if(   (write_read_len == IMAGE_SIZE ))
-		wr_burst_data_reg_add	<=	wr_burst_data_reg_add	+	16'h1111;
-end
+assign wr_data = wr_data_reg;
+assign x_cnt = write_read_len[9:0];
+assign y_cnt = write_read_len[31:10];
 
 
+// 输入指令处理
 
-always@(posedge mem_clk or posedge rst)
-begin
-	if(rst)
-		wr_burst_data_reg <= 64'b0;
-		
-	else if( x_cnt == VIDEO_WIDTH/Scaling_Ratio  ||  y_cnt == VIDEO_HEIGHT/Scaling_Ratio  )	
-		wr_burst_data_reg	<=    {4{wr_burst_data_reg_add}};
 
-    else if( ( x_cnt == VIDEO_WIDTH/2  ||  y_cnt == VIDEO_HEIGHT/2 ) && display_model == 1 )	
-		wr_burst_data_reg	<=    {4{wr_burst_data_reg_add}};
-
-	else if( y_cnt >= ( VIDEO_HEIGHT/Scaling_Ratio )|| x_cnt >=( VIDEO_WIDTH/Scaling_Ratio ) )	
-		wr_burst_data_reg <= 64'b0;
-
-	else if( x_cnt < x_shift_cnt || y_cnt < y_shift_cnt)	
-		wr_burst_data_reg <= 64'b0;	
-  	
-	else if( x_rotate > VIDEO_WIDTH || y_rotate >= VIDEO_HEIGHT )
-		wr_burst_data_reg <= 64'hdddd;
-
-	else if(state == MEM_READ && rd_burst_data_valid )
-		wr_burst_data_reg <= rd_burst_data;
+// 缩放值的处理
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        scale_value	<= 'b0;
+    end
+    else if( scale_value == 1 && key_out[1]) begin
+        scale_value	<= 4'd6;
+    end
+    else if( scale_value == 6 && key_out[2])
+        scale_value	<=	1;
+    else if( function_mode != 4 )		
+        scale_value	<=	11'b1;
+    else if( key_out[2] && function_mode == 4)
+        scale_value	<=	scale_value	+ 11'd1;	
+    else if( key_out[1] && function_mode == 4)
+        scale_value	<=	scale_value	-	11'd1;
+    else begin
+        scale_value <= 4'd1;
+    end
 end
 
 
-always@(posedge mem_clk or posedge rst)
+// 划定有效像素的边界，每帧的边界行列均显示特定颜色
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        wr_data_border <= 'd0;
+    end
+    else if(wr_data_border >= 16'hefff) begin
+        wr_data_border <= 16'h1111;
+    end
+    else if(write_read_len == IMAGE_SIZE) begin
+        wr_data_border <= wr_data_border + 16'h1111;
+    end
+    else begin
+        wr_data_border <= 16'h1111;
+    end
+end
+
+
+// 对写回的数据进行操作，有效值直接赋值，其他部分置零
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        wr_data_reg <= 'b0;
+    end
+    // 在缩放模式下，对缩放后的有效像素边界行和列添加特定颜色的边界
+    /*else if((x_cnt == VIDEO_WIDTH / scale_value) || (y_cnt == VIDEO_HEIGHT / scale_value)) begin
+        wr_data_reg <= {4{wr_data_border}};
+    end
+    // 在旋转模式下，在行列的中部分别添加特定颜色边界，将屏幕划分为 4 份
+    else if(((x_cnt == VIDEO_WIDTH / 2) || (y_cnt == VIDEO_HEIGHT / 2)) && (function_mode == 1)) begin
+        wr_data_reg <= {4{wr_data_border}};
+    end*/
+    else if((y_cnt >= VIDEO_HEIGHT / scale_value) || (x_cnt >= VIDEO_WIDTH / scale_value)) begin
+        wr_data_reg <= 'b0;
+    end
+    else if((x_cnt < x_shift_cnt) || (y_cnt < y_shift_cnt)) begin	
+        wr_data_reg <= 'b0;	
+    end
+    else if((x_rotate > VIDEO_WIDTH) || (y_rotate >= VIDEO_HEIGHT)) begin
+        wr_data_reg <= 'hdddd;
+    end
+    else if((state == MEM_READ) && (rd_ready == 1'b1)) begin
+        wr_data_reg <= rd_data;
+    end
+    else begin
+        wr_data_reg <= 'b0;
+    end
+end
+
+
+// 
+always@(posedge clk or negedge rst)
 begin
-	if(rst)
-		display_model	<=	0;
-	else if( display_model == 8 )
-		display_model	<=	'b0;
+    if(!rst)
+        function_mode	<=	0;
+    else if( function_mode == 8 )
+        function_mode <= 'b0;
     else if( key_out[0] )
-		display_model	<=	display_model	+	5'd1;	
+        function_mode	<=	function_mode	+	5'd1;	
 end
 
-always@(posedge mem_clk or posedge rst)
+
+// 
+always@(posedge clk or negedge rst)
 begin
-	if(rst)
-		angle_temp	<=	9'b0;
-	else if( angle_temp == 0 && key_out[1] )
+    if(!rst)
+        angle_temp	<=	9'b0;
+    else if( angle_temp == 0 && key_out[1] )
         angle_temp	<=	360;
     else if( angle_temp == 360 && key_out[2] )
-		angle_temp	<=	9'b0;
-	else if( display_model != 1 )
-		angle_temp	<=	16'b0;
-    else if( key_out[2]  && display_model == 1)
-		angle_temp	<=	angle_temp	+	16'd1;	
-	else if( key_out[1]  && display_model == 1)
-		angle_temp	<=	angle_temp	-	16'd1;	
-end
-
-always@(posedge mem_clk or posedge rst)
-begin
-	if(rst)
-		x_shift_cnt	<=	0;
-	else if( x_shift_cnt == 0 && key_out[1] )
-		x_shift_cnt	<=	VIDEO_WIDTH;
-	else if( x_shift_cnt == VIDEO_WIDTH && key_out[2] )
-		x_shift_cnt	<=	0;	
-	
-	else if( display_model != 2 )
-		x_shift_cnt	<=	11'b0;		
-    else if( key_out[2] && display_model == 2 )
-		x_shift_cnt	<=	x_shift_cnt	+	11'd5;	
-	else if( key_out[1] && display_model == 2 )
-		x_shift_cnt	<=	x_shift_cnt	-	11'd5;
-end
-
-always@(posedge mem_clk or posedge rst)
-begin
-	if(rst)
-		y_shift_cnt	<=	0;
-		
-		
-	else if( y_shift_cnt == 0 && key_out[1] )
-		y_shift_cnt	<=	VIDEO_HEIGHT;
-	else if( y_shift_cnt == VIDEO_HEIGHT && key_out[2] )
-		y_shift_cnt	<=	0;	
-		
-		
-	else if( display_model != 3 )
-		y_shift_cnt	<=	11'b0;		
-    else if( key_out[2] && display_model == 3 )
-		y_shift_cnt	<=	y_shift_cnt	+	11'd5;	
-	else if( key_out[1] && display_model == 3 )
-		y_shift_cnt	<=	y_shift_cnt	-	11'd5;
+        angle_temp	<=	9'b0;
+    else if( function_mode != 1 )
+        angle_temp	<=	16'b0;
+    else if( key_out[2]  && function_mode == 1)
+        angle_temp	<=	angle_temp	+	16'd1;	
+    else if( key_out[1]  && function_mode == 1)
+        angle_temp	<=	angle_temp	-	16'd1;	
 end
 
 
-always@(posedge mem_clk or posedge rst)
+// 
+always@(posedge clk or negedge rst)
 begin
-	if(rst)
-		Scaling_Ratio	<=	1;
-	else if( Scaling_Ratio == 1 && key_out[1])
-		Scaling_Ratio	<=	6;
-    else if( Scaling_Ratio == 6 && key_out[2])
-		Scaling_Ratio	<=	1;
-	
-    else if( display_model != 4 )		
-		Scaling_Ratio	<=	11'b1;
-    else if( key_out[2] && display_model == 4)
-		Scaling_Ratio	<=	Scaling_Ratio	+	11'd1;	
-	else if( key_out[1] && display_model == 4)
-		Scaling_Ratio	<=	Scaling_Ratio	-	11'd1;
+    if(!rst)
+        x_shift_cnt	<=	0;
+    else if( x_shift_cnt == 0 && key_out[1] )
+        x_shift_cnt	<=	VIDEO_WIDTH;
+    else if( x_shift_cnt == VIDEO_WIDTH && key_out[2] )
+        x_shift_cnt	<=	0;	
+    else if( function_mode != 2 )
+        x_shift_cnt	<=	11'b0;		
+    else if( key_out[2] && function_mode == 2 )
+        x_shift_cnt	<=	x_shift_cnt	+	11'd5;	
+    else if( key_out[1] && function_mode == 2 )
+        x_shift_cnt	<=	x_shift_cnt	-	11'd5;
 end
 
 
-always@(posedge mem_clk or posedge rst)
+// 
+always@(posedge clk or negedge rst)
 begin
-	if(rst)
-		threshold	<=	10;
-	else if( threshold == 10 && key_out[1])
-		threshold	<=	250;
+    if(!rst)
+        y_shift_cnt	<=	0;
+    else if( y_shift_cnt == 0 && key_out[1] )
+        y_shift_cnt	<=	VIDEO_HEIGHT;
+    else if( y_shift_cnt == VIDEO_HEIGHT && key_out[2] )
+        y_shift_cnt	<=	0;	
+    else if( function_mode != 3 )
+        y_shift_cnt	<=	11'b0;		
+    else if( key_out[2] && function_mode == 3 )
+        y_shift_cnt	<=	y_shift_cnt	+	11'd5;	
+    else if( key_out[1] && function_mode == 3 )
+        y_shift_cnt	<=	y_shift_cnt	-	11'd5;
+end
+
+
+// 
+always@(posedge clk or negedge rst)
+begin
+    if(!rst)
+        threshold	<=	10;
+    else if( threshold == 10 && key_out[1])
+        threshold	<=	250;
     else if( threshold >= 250 && key_out[2])
-		threshold	<=	10;
-	
-    else if( display_model != 6 )		
-		threshold	<=	10;
-    else if( key_out[2] && display_model == 6)
-		threshold	<=	threshold	+	11'd5;	
-	else if( key_out[1] && display_model == 6)
-		threshold	<=	threshold	-	11'd5;
+        threshold	<=	10;
+    else if( function_mode != 6 )		
+        threshold	<=	10;
+    else if( key_out[2] && function_mode == 6)
+        threshold	<=	threshold	+	11'd5;	
+    else if( key_out[1] && function_mode == 6)
+        threshold	<=	threshold	-	11'd5;
 end
 
 
-always@(posedge mem_clk or posedge rst)
+always@(posedge clk or negedge rst)
 begin
-	if(rst)
-		rd_burst_addr 		<='h000000;
-	else if( write_read_len == IMAGE_SIZE )
-		rd_burst_addr 		<='h000000;
-	else case( display_model )
-		0	:	
-			rd_burst_addr 	<= 	rd_burst_addr_start	+	write_read_len;
-		1	:	
-			rd_burst_addr 	<= 	rd_burst_addr_start	+	x_rotate	+	VIDEO_WIDTH*y_rotate;
-		2	:	
-			rd_burst_addr 	<= 	rd_burst_addr_start	+	x_cnt	+	VIDEO_WIDTH*y_cnt    - x_shift_cnt ;	
-		3	:	
-			rd_burst_addr 	<= 	rd_burst_addr_start	+	x_cnt	+	VIDEO_WIDTH*y_cnt    -   VIDEO_WIDTH*y_shift_cnt;
-		4	:	
-			rd_burst_addr 	<= 	rd_burst_addr_start	+	Scaling_Ratio*x_cnt	+	Scaling_Ratio*VIDEO_WIDTH*y_cnt;                
-		default:	
-			rd_burst_addr 	<= 	rd_burst_addr_start	+	write_read_len;	
-	
-	endcase
+    if(!rst)
+        rd_addr 		<='h000000;
+    else if( write_read_len == IMAGE_SIZE )
+        rd_addr 		<='h000000;
+    else case( function_mode )
+        0	:	
+            rd_addr 	<= 	rd_burst_addr_start	+	write_read_len;
+        1	:	
+            rd_addr 	<= 	rd_burst_addr_start	+	x_rotate	+	VIDEO_WIDTH*y_rotate;
+        2	:	
+            rd_addr 	<= 	rd_burst_addr_start	+	x_cnt	+	VIDEO_WIDTH*y_cnt    - x_shift_cnt ;	
+        3	:	
+            rd_addr 	<= 	rd_burst_addr_start	+	x_cnt	+	VIDEO_WIDTH*y_cnt    -   VIDEO_WIDTH*y_shift_cnt;
+        4	:	
+            rd_addr 	<= 	rd_burst_addr_start	+	scale_value*x_cnt	+	scale_value*VIDEO_WIDTH*y_cnt;                
+        default:	
+            rd_addr 	<= 	rd_burst_addr_start	+	write_read_len;	
+    
+    endcase
 end
-		
-always@(posedge mem_clk or posedge rst)
+        
+always@(posedge clk or negedge rst)
 begin
-	if(rst)
-		display_number 		<=0;
-	else case( display_model )
-		0	:	
-			display_number 	<= 0;
-		1	:	
-			display_number 	<= 	angle;
-		2	:	
-			display_number 	<= 	x_shift_cnt ;	
-		3	:	
-			display_number 	<= 	y_shift_cnt;
-		4	:	
-			display_number 	<=  Scaling_Ratio;
+    if(!rst)
+        display_number 		<=0;
+    else case( function_mode )
+        0	:	
+            display_number 	<= 0;
+        1	:	
+            display_number 	<= 	angle;
+        2	:	
+            display_number 	<= 	x_shift_cnt ;	
+        3	:	
+            display_number 	<= 	y_shift_cnt;
+        4	:	
+            display_number 	<=  scale_value;
         6    :    
             display_number 	<=  threshold;
-		default:	
-			display_number 	<= 0;		
-	endcase
+        default:	
+            display_number 	<= 0;		
+    endcase
 end			
 
 
-coor_trans coor_trans_inst
-(
-    .clk		(	mem_clk			),
+coor_trans coor_trans_inst (
+    .clk		(	clk			),
     .rst_n		(	rst_n			),
     
     
@@ -296,125 +310,87 @@ coor_trans coor_trans_inst
     .y_in		(	y_cnt			),
    
 
-	.x_out		(	x_rotate		),
+    .x_out		(	x_rotate		),
     .y_out		(	y_rotate		)
 );
 
 
 
 
-always@(posedge mem_clk or posedge rst)
+always@(posedge clk or negedge rst)
 begin
-	if(rst)
-		wr_burst_addr_start	<=32'd6220800 ;
-	else if( image_addr_flag )					//image_addr_flag==1
-		wr_burst_addr_start	<=32'd4147200 ;
-	else	
-		wr_burst_addr_start	<=32'd6220800;		//image_addr_flag==0
+    if(!rst)
+        wr_burst_addr_start	<=32'd6220800 ;
+    else if( image_addr_flag )					//image_addr_flag==1
+        wr_burst_addr_start	<=32'd4147200 ;
+    else	
+        wr_burst_addr_start	<=32'd6220800;		//image_addr_flag==0
 end
 
-always@(posedge mem_clk or posedge rst)
+always@(posedge clk or negedge rst)
 begin
-	if(rst)
-		rd_burst_addr_start	<=32'd2073600;
-	else if( image_addr_flag )					//image_addr_flag==1
-		rd_burst_addr_start	<=32'd0  ;
-	else	
-		rd_burst_addr_start	<=32'd2073600;		//image_addr_flag==0
+    if(!rst)
+        rd_burst_addr_start	<=32'd2073600;
+    else if( image_addr_flag )					//image_addr_flag==1
+        rd_burst_addr_start	<=32'd0  ;
+    else	
+        rd_burst_addr_start	<=32'd2073600;		//image_addr_flag==0
 end
 
 
-always@(posedge mem_clk or posedge rst)
-begin
-	if(rst)
-	begin
+always@(posedge clk or negedge rst) begin
+    if(!rst) begin
         angle                <=    'b0;
         state 				<= IDLE;
-		i_en				<=	1'b1;
-		image_addr_flag		<=	1'b0;
-		
-		wr_burst_req 		<= 1'b0;
-		rd_burst_req 		<= 1'b0;
-		
-		rd_burst_len 		<= BURST_LEN;
-		wr_burst_len 		<= BURST_LEN;
-		
-		wr_burst_addr 		<='h000000;
-//		rd_burst_addr 		<='h000000;
-		
-		write_read_len 		<= 32'd0;
-	end
-
-    else if( write_read_len == IMAGE_SIZE )
-        begin
-//           if( angle == 359 )                
-//               angle	<=	'b0;
-//           else
-//               angle	<=	angle	+	16'd1;  
-
-			angle	<=		angle_temp;
-
-			i_en			<=	1'b0;
-			state			<=	IDLE;
-            write_read_len	<= 	32'd0;
-			image_addr_flag	<=	~image_addr_flag;	
-			
-			wr_burst_req 	<=	1'b0;
-			rd_burst_req 	<=	1'b0;		
-		
-			wr_burst_addr 	<=	32'd2073600;
-//			rd_burst_addr 	<=	'h000000;
-			
-        end
-
-
-	else
-	begin
-		case(state)
-			IDLE:			
-
-//			if( time_cnt == 3  ) 
-			begin
-				i_en			<=	1'b0;
-				state 			<= 	MEM_READ;
-				rd_burst_req 	<= 	1'b1;									
-
-//				rd_burst_addr 	<= 	rd_burst_addr_start	+	write_read_len;					
-//				rd_burst_addr 	<= 	rd_burst_addr_start	+	x_cnt	+	256*y_cnt    - x_shift_cnt -   3*256*y_shift_cnt;					
-//				rd_burst_addr 	<= 	rd_burst_addr_start	+	Scaling_Ratio*x_cnt	+	Scaling_Ratio*256*y_cnt- x_shift_cnt -   3*256*y_shift_cnt;					
-//				rd_burst_addr 	<= 	rd_burst_addr_start	+	x_rotate	+	VIDEO_WIDTH*y_rotate;
-
-					
-			end
-			
-			MEM_READ:
-			begin
-				if(rd_burst_finish)
-				begin
-					state 			<= 	MEM_WRITE;					
-					rd_burst_req 	<= 	1'b0;				
-					wr_burst_req 	<=	1'b1;
-					
-//					wr_burst_addr 	<= 	wr_burst_addr_start  +	write_read_len;					
-					wr_burst_addr 	<= 	wr_burst_addr_start  +	x_cnt	+	VIDEO_WIDTH*y_cnt;
-				end
-			end
-			
-			MEM_WRITE:
-			begin
-				if(wr_burst_finish)
-				begin
-					state 			<=	IDLE;
-					wr_burst_req 	<=	1'b0;
-					write_read_len 	<= write_read_len +	1'b1;
-					i_en			<=	1'b1;
-				end
-			end
-
-			default:
-				state <= IDLE;
-		endcase
-	end
+        i_en				<=	1'b1;
+        image_addr_flag		<=	1'b0;
+        
+        wr_valid 		<= 1'b0;
+        rd_valid 		<= 1'b0;
+        
+        rd_burst_len 		<= BURST_LEN;
+        wr_burst_len 		<= BURST_LEN;
+        
+        wr_addr 		<='h000000;
+        write_read_len 		<= 32'd0;
+    end
+    else if( write_read_len == IMAGE_SIZE ) begin
+        angle	<=		angle_temp;
+        i_en			<=	1'b0;
+        state			<=	IDLE;
+        write_read_len	<= 	32'd0;
+        image_addr_flag	<=	~image_addr_flag;	
+        wr_valid 	<=	1'b0;
+        rd_valid 	<=	1'b0;		
+        wr_addr 	<=	32'd2073600;      
+    end
+    else begin
+        case(state)
+            IDLE: begin
+                i_en			<=	1'b0;
+                state 			<= 	MEM_READ;
+                rd_valid 	<= 	1'b1;
+            end
+            MEM_READ: begin
+                if(rd_burst_finish) begin
+                    state 			<= 	MEM_WRITE;					
+                    rd_valid 	<= 	1'b0;				
+                    wr_valid 	<=	1'b1;		
+                    wr_addr 	<= 	wr_burst_addr_start  +	x_cnt	+	VIDEO_WIDTH*y_cnt;
+                end
+            end
+            MEM_WRITE: begin
+                if(wr_burst_finish)
+                begin
+                    state 			<=	IDLE;
+                    wr_valid 	<=	1'b0;
+                    write_read_len 	<= write_read_len +	1'b1;
+                    i_en			<=	1'b1;
+                end
+            end
+            default: state <= IDLE;
+        endcase
+    end
 end
 
 

@@ -191,7 +191,7 @@ pll_top clock_manager (
 
 
 //
-// UART 指令控制
+// UART 指令控制，[7:4] 指令通道，[3:0] 值通道
 uart_trans command_ctrl(
     .clk            (sys_clk),
     .rst            (sys_rst),
@@ -351,7 +351,7 @@ hdmi_data_in u_hdmi_data_in(
 // 图像数据多窗口处理
 image_global multi_image_load(
     .rst                    (ddr_init_done),
-    .command_in             (command_out[3:0]),
+    .command_in             (command_out),
 
     .cmos1_pclk             (cmos1_pclk_16bit   ),
     .cmos1_href             (cmos1_href_16bit   ),
