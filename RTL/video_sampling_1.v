@@ -292,7 +292,7 @@ always @(posedge clk or negedge rst) begin
         rd_valid_d1 <= 'b0;
     end
     else begin
-        rd_valid_d1 <= 'b0;
+        rd_valid_d1 <= rd_valid;
     end
 end
 assign pose_rd_valid = ((rd_valid) && (~rd_valid_d1)) ? 1'b1 : 1'b0;
@@ -314,6 +314,7 @@ always @(posedge clk or negedge rst) begin
     end
 end
 
+// 判定存入数据量是否已经足够进行一次突发传输
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
         data_out_ready <= 'b0;

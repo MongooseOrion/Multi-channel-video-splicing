@@ -23,9 +23,10 @@
 * FILE ENCODER TYPE: GBK
 * ========================================================================
 */
-// 图像旋转模块
-
-module image_rotation #(
+// 图像处理模块
+// 旋转、缩放、平移
+// 
+module image_process #(
     parameter MEM_DATA_LEN = 'd64,
     parameter ADDR_LEN = 'd32,
     parameter VIDEO_WIDTH =	'd1024,
@@ -54,7 +55,7 @@ module image_rotation #(
     output reg							image_addr_flag,
     output reg	[4:0]					function_mode,
     output reg	[15:0]					display_number,
-    output reg	[10:0]   				threshold,          // 二值化阈值
+    output reg	[10:0]   				color_threshold,          // 二值化阈值
     output reg 							error
 );
 
@@ -240,17 +241,17 @@ end
 always@(posedge clk or negedge rst)
 begin
     if(!rst)
-        threshold	<=	10;
-    else if( threshold == 10 && key_out[1])
-        threshold	<=	250;
-    else if( threshold >= 250 && key_out[2])
-        threshold	<=	10;
+        color_threshold	<=	10;
+    else if( color_threshold == 10 && key_out[1])
+        color_threshold	<=	250;
+    else if( color_threshold >= 250 && key_out[2])
+        color_threshold	<=	10;
     else if( function_mode != 6 )		
-        threshold	<=	10;
+        color_threshold	<=	10;
     else if( key_out[2] && function_mode == 6)
-        threshold	<=	threshold	+	11'd5;	
+        color_threshold	<=	color_threshold	+	11'd5;	
     else if( key_out[1] && function_mode == 6)
-        threshold	<=	threshold	-	11'd5;
+        color_threshold	<=	color_threshold	-	11'd5;
 end
 
 
@@ -293,7 +294,7 @@ begin
         4	:	
             display_number 	<=  scale_value;
         6    :    
-            display_number 	<=  threshold;
+            display_number 	<=  color_threshold;
         default:	
             display_number 	<= 0;		
     endcase

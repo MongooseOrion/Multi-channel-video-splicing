@@ -20,11 +20,11 @@
 * the respective OPEN-SOURCE licenses. 
 * 
 * THIS CODE IS PROVIDED BY https://github.com/MongooseOrion. 
+* FILE ENCODER TYPE: UTF-8
 * ========================================================================
 */
-//
 // uart uart_tx 模块
-
+// 
 module uart_tx#(
     parameter CLK_FEQ = 26'd50_000_000,
     parameter UART_BOT = 15'd9600
@@ -51,7 +51,7 @@ always @(posedge clk or negedge rst) begin
     else if(data_in_flag) begin
         work_en <= 1'b1;
     end
-    else if((bit_cnt==4'd9) && (baud_cnt==16'd2000)) begin
+    else if((bit_cnt == 4'd9) && (baud_cnt == BIT_CNT_MAX/2 - 1'b1)) begin
         work_en <= 1'b0;
     end
 end

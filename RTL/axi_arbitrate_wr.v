@@ -30,7 +30,7 @@ module axi_arbitrate_wr #(
     parameter MEM_COLUMN_WIDTH     = 10    ,
     parameter MEM_BANK_WIDTH       = 3     ,
     parameter CTRL_ADDR_WIDTH = MEM_ROW_WIDTH + MEM_BANK_WIDTH + MEM_COLUMN_WIDTH,
-    parameter M_ADDR_WIDTH      = 5'd5,
+    parameter M_ADDR_WIDTH      = 5'd5,             // FIFO 读通道位宽
     parameter AXI_ADDR_WIDTH    = 6'd27,
     parameter DQ_WIDTH          = 12'd32,
     parameter LEN_WIDTH         = 12'd16,
@@ -110,6 +110,7 @@ reg                             reg_axi_bready  ;
 
 reg [3:0]           state;
 reg                 axi_wr_en;
+reg [4:0]           burst_len_count;
 
 assign axi_awaddr   = reg_axi_awaddr        ;
 assign axi_awvalid  = reg_axi_awvalid       ;
@@ -220,6 +221,10 @@ end
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
         channel1_rvalid <= 'b0;
+        channel2_rvalid <= 'b0;
+        channel3_rvalid <= 'b0;
+        channel4_rvalid <= 'b0;
+        channel5_rvalid <= 'b0;
         axi_wr_en <= 'b0;
         reg_axi_awvalid <= 'b0;
     end
@@ -240,11 +245,11 @@ always @(posedge clk or negedge rst) begin
                 end
                 else if(axi_wlast) begin
                     axi_wr_en <= 1'b0;
-                    reg_axi_awvalid <= reg_axi_awvalid;
+                    reg_axi_awvalid <= 1'b1;
                 end
                 else begin
                     axi_wr_en <= axi_wr_en;
-                    reg_axi_awvalid <= 1'b1;
+                    reg_axi_awvalid <= reg_axi_awvalid;
                 end
             end
             CH2_WAIT: begin
@@ -262,11 +267,11 @@ always @(posedge clk or negedge rst) begin
                 end
                 else if(axi_wlast) begin
                     axi_wr_en <= 1'b0;
-                    reg_axi_awvalid <= reg_axi_awvalid;
+                    reg_axi_awvalid <= 1'b1;
                 end
                 else begin
                     axi_wr_en <= axi_wr_en;
-                    reg_axi_awvalid <= 1'b1;
+                    reg_axi_awvalid <= reg_axi_awvalid;
                 end
             end
             CH3_WAIT: begin
@@ -284,11 +289,11 @@ always @(posedge clk or negedge rst) begin
                 end
                 else if(axi_wlast) begin
                     axi_wr_en <= 1'b0;
-                    reg_axi_awvalid <= reg_axi_awvalid;
+                    reg_axi_awvalid <= 1'b1;
                 end
                 else begin
                     axi_wr_en <= axi_wr_en;
-                    reg_axi_awvalid <= 1'b1;
+                    reg_axi_awvalid <= reg_axi_awvalid;
                 end
             end
             CH4_WAIT: begin
@@ -306,11 +311,11 @@ always @(posedge clk or negedge rst) begin
                 end
                 else if(axi_wlast) begin
                     axi_wr_en <= 1'b0;
-                    reg_axi_awvalid <= reg_axi_awvalid;
+                    reg_axi_awvalid <= 1'b1;
                 end
                 else begin
                     axi_wr_en <= axi_wr_en;
-                    reg_axi_awvalid <= 1'b1;
+                    reg_axi_awvalid <= reg_axi_awvalid;
                 end
             end
             CH5_WAIT: begin
@@ -328,22 +333,150 @@ always @(posedge clk or negedge rst) begin
                 end
                 else if(axi_wlast) begin
                     axi_wr_en <= 1'b0;
-                    reg_axi_awvalid <= reg_axi_awvalid;
+                    reg_axi_awvalid <= 1'b1;
                 end
                 else begin
                     axi_wr_en <= axi_wr_en;
-                    reg_axi_awvalid <= 1'b1;
+                    reg_axi_awvalid <= reg_axi_awvalid;
                 end
+            end
+            default: begin
+                channel1_rvalid <= 1'b0;
+                channel2_rvalid <= 1'b0;
+                channel3_rvalid <= 1'b0;
+                channel4_rvalid <= 1'b0;
+                channel5_rvalid <= 1'b0;
+                axi_wr_en <= 1'b0;
+                reg_axi_awvalid <= 1'b0;
             end
         endcase
     end
 end
 
 
-// AXI 写通道
+// 突发长度计数
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
-        
+        burst_len_count <= 'b0;
+    end
+    else if((axi_wvalid == 1'b1) && (axi_wready == 1'b1)) begin
+        if(burst_len_count == LEN_WIDTH - 1'b1) begin
+            burst_len_count <= 'b0;
+        end
+        else begin
+            burst_len_count <= burst_len_count + 1'b1;
+        end
+    end
+    else begin
+        burst_len_count <= 5'b0;
+    end
+end
+
+
+// AXI 写使能
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        reg_axi_wvalid <= 'b0;
+    end
+    else if(axi_wr_en) begin
+        if((axi_wlast == 1'b1) && (axi_wready == 1'b1)) begin
+            reg_axi_wvalid <= 1'b0;
+        end
+        else begin
+            reg_axi_wvalid <= 1'b1;
+        end
+    end
+end
+
+
+// AXI 写首地址生成
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        reg_axi_awaddr <= 'b0;
+    end
+    else if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
+        reg_axi_awaddr <= reg_axi_awaddr + LEN_WIDTH;
+    end
+    else begin
+        reg_axi_awaddr <= reg_axi_awaddr;
+    end
+end
+
+
+// 向外（buffer）发出读地址请求，这必须在 AXI 总线的 wvalid 拉高后马上送
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        channel1_addr <= 'b0;
+        channel2_addr <= 'b0;
+        channel3_addr <= 'b0;
+        channel4_addr <= 'b0;
+        channel5_addr <= 'b0;
+        reg_axi_wdata <= 'b0;
+    end
+    else if((axi_wvalid == 1'b1) && (axi_wready == 1'b1)) begin
+        case(state)
+            CH_1: begin
+                if(burst_len_count <= LEN_WIDTH - 1'b1) begin
+                    channel1_addr <= channel1_addr + 1'b1;
+                end
+                else begin
+                    channel1_addr <= channel1_addr;
+                end
+                reg_axi_wdata <= channel1_data;
+            end
+            CH_2: begin
+                if(burst_len_count <= LEN_WIDTH - 1'b1) begin
+                    channel2_addr <= channel2_addr + 1'b1;
+                end
+                else begin
+                    channel2_addr <= channel2_addr;
+                end
+                reg_axi_wdata <= channel2_data;
+            end
+            CH_3: begin
+                if(burst_len_count <= LEN_WIDTH - 1'b1) begin
+                    channel3_addr <= channel3_addr + 1'b1;
+                end
+                else begin
+                    channel3_addr <= channel3_addr;
+                end
+                reg_axi_wdata <= channel3_data;
+            end
+            CH_4: begin
+                if(burst_len_count <= LEN_WIDTH - 1'b1) begin
+                    channel4_addr <= channel4_addr + 1'b1;
+                end
+                else begin
+                    channel4_addr <= channel4_addr;
+                end
+                reg_axi_wdata <= channel4_data;
+            end
+            CH_5: begin
+                if(burst_len_count <= LEN_WIDTH - 1'b1) begin
+                    channel5_addr <= channel5_addr + 1'b1;
+                end
+                else begin
+                    channel5_addr <= channel5_addr;
+                end
+                reg_axi_wdata <= channel5_data;
+            end
+            default: begin
+                channel1_addr <= channel1_addr;
+                channel2_addr <= channel2_addr;
+                channel3_addr <= channel3_addr;
+                channel4_addr <= channel4_addr;
+                channel5_addr <= channel5_addr;
+                reg_axi_wdata <= reg_axi_wdata;
+            end
+        endcase
+    end
+    else begin
+        channel1_addr <= channel1_addr;
+        channel2_addr <= channel2_addr;
+        channel3_addr <= channel3_addr;
+        channel4_addr <= channel4_addr;
+        channel5_addr <= channel5_addr;
+        reg_axi_wdata <= reg_axi_wdata;
     end
 end
 

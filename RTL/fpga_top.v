@@ -196,8 +196,6 @@ uart_trans command_ctrl(
     .clk            (sys_clk),
     .rst            (sys_rst),
     .uart_rx        (uart_rx),
-    .command_out    (command_out),  // [7:0] 输入板上的控制指令
-    .command_in     (command_in),
     .uart_tx        (uart_tx)
 );
 

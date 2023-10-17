@@ -20,34 +20,65 @@
 * the respective OPEN-SOURCE licenses. 
 * 
 * THIS CODE IS PROVIDED BY https://github.com/MongooseOrion. 
+* FILE ENCODER TYPE: UTF-8
 * ========================================================================
 */
-//
 // UART 指令控制模块
-
+// 
 module uart_trans(
     input           clk,
     input           rst,  
     input           uart_rx,
-    input   [7:0]   command_in,   
+    input   [7:0]   command_in, 
+    input           command_in_flag,  
     output          uart_tx,
-    output  [7:0]   command_out
+    output  [3:0]   ctrl_command_out,
+    output  [3:0]   value_command_out
 );
 
+wire            data_out_flag;
+wire [7:0]      command_out;
 
+reg [3:0]       reg_ctrl_command;
+reg [3:0]       reg_value_command;
+
+assign ctrl_command_out = reg_ctrl_command;
+assign value_command_out = reg_value_command;
+
+
+// 从电脑接收控制信号
 uart_rx command_recv(
     .clk            (clk),
     .rst            (rst),
     .data_out       (command_out),
-    .data_out_flag  (),
+    .data_out_flag  (data_out_flag),
     .uart_rx        (uart_rx)
 );
 
+
+// 控制信号只有效一个时钟周期
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        reg_ctrl_command <= 'b0;
+        reg_value_command <= 'b0;
+    end
+    else if(data_out_flag) begin
+        reg_ctrl_command <= command_out[7:4];
+        reg_value_command <= command_out[3:0];
+    end
+    else begin
+        reg_ctrl_command <= reg_ctrl_command;
+        reg_value_command <= 4'b0;
+    end
+end
+
+
+// 板上反馈信息
 uart_tx command_deliver(
     .clk            (clk),
     .rst            (rst),
     .data_in        (command_in),
-    .data_in_flag   (data_in_flag),
+    .data_in_flag   (command_in_flag),
     .uart_tx        (uart_tx)
 );
 
