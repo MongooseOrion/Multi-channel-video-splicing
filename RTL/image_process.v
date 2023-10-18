@@ -36,8 +36,10 @@ module image_process #(
     input 								rst,                  
     input 								clk,                // mem_clk
     input      	[2:0]          			key_out,
-    input       [7:0]                   command_in,   	
+    input       [3:0]                   ctrl_command_in,   	// 控制信道
+    input       [3:0]                   value_command_in,   // 数据通道
     // 读通道
+    // 这是主设备
     output reg 							rd_valid,           // 读请求
     input 								rd_ready,           // 读数据准备
     output reg 	[9:0] 					rd_burst_len,       // 读突发长度
@@ -78,6 +80,9 @@ wire				o_en;
 wire [12:0]         x_cnt; 
 wire [12:0]         y_cnt;
 
+reg [3:0]                   reg_ctrl_command;
+reg [2:0]                   positive_value_command;
+reg [2:0]                   negative_value_command;
 reg [2:0] 	     			state;
 reg [7:0] 					wr_cnt;
 reg [MEM_DATA_LEN - 1:0] 	wr_data_reg;
@@ -99,17 +104,37 @@ assign y_cnt = write_read_len[31:10];
 
 
 // 输入指令处理
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        reg_ctrl_command <= 'b0;
+        negative_value_command <= 'b0;
+        positive_value_command <= 'b0;
+    end
+    else if(value_command_in[3] == 1'b0) begin
+        reg_ctrl_command <= ctrl_command_in;
+        positive_value_command <= value_command_in[2:0];
+    end
+    else if(value_command_in[3] == 1'b1) begin
+        reg_ctrl_command <= ctrl_command_in;
+        negative_value_command <= value_command_in[2:0];
+    end
+    else begin
+        reg_ctrl_command <= reg_ctrl_command;
+        negative_value_command <= 3'b0;
+        positive_value_command <= 3'b0;
+    end
+end
 
 
-// 缩放值的处理
+// 缩放模式，缩放值的处理
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
         scale_value	<= 'b0;
     end
-    else if( scale_value == 1 && key_out[1]) begin
+    else if((scale_value == 4'b1) && (key_out[1])) begin
         scale_value	<= 4'd6;
     end
-    else if( scale_value == 6 && key_out[2])
+    else if((scale_value == 4'd6) && key_out[2])
         scale_value	<=	1;
     else if( function_mode != 4 )		
         scale_value	<=	11'b1;
@@ -123,69 +148,8 @@ always @(posedge clk or negedge rst) begin
 end
 
 
-// 划定有效像素的边界，每帧的边界行列均显示特定颜色
-always @(posedge clk or negedge rst) begin
-    if(!rst) begin
-        wr_data_border <= 'd0;
-    end
-    else if(wr_data_border >= 16'hefff) begin
-        wr_data_border <= 16'h1111;
-    end
-    else if(write_read_len == IMAGE_SIZE) begin
-        wr_data_border <= wr_data_border + 16'h1111;
-    end
-    else begin
-        wr_data_border <= 16'h1111;
-    end
-end
-
-
-// 对写回的数据进行操作，有效值直接赋值，其他部分置零
-always @(posedge clk or negedge rst) begin
-    if(!rst) begin
-        wr_data_reg <= 'b0;
-    end
-    // 在缩放模式下，对缩放后的有效像素边界行和列添加特定颜色的边界
-    /*else if((x_cnt == VIDEO_WIDTH / scale_value) || (y_cnt == VIDEO_HEIGHT / scale_value)) begin
-        wr_data_reg <= {4{wr_data_border}};
-    end
-    // 在旋转模式下，在行列的中部分别添加特定颜色边界，将屏幕划分为 4 份
-    else if(((x_cnt == VIDEO_WIDTH / 2) || (y_cnt == VIDEO_HEIGHT / 2)) && (function_mode == 1)) begin
-        wr_data_reg <= {4{wr_data_border}};
-    end*/
-    else if((y_cnt >= VIDEO_HEIGHT / scale_value) || (x_cnt >= VIDEO_WIDTH / scale_value)) begin
-        wr_data_reg <= 'b0;
-    end
-    else if((x_cnt < x_shift_cnt) || (y_cnt < y_shift_cnt)) begin	
-        wr_data_reg <= 'b0;	
-    end
-    else if((x_rotate > VIDEO_WIDTH) || (y_rotate >= VIDEO_HEIGHT)) begin
-        wr_data_reg <= 'hdddd;
-    end
-    else if((state == MEM_READ) && (rd_ready == 1'b1)) begin
-        wr_data_reg <= rd_data;
-    end
-    else begin
-        wr_data_reg <= 'b0;
-    end
-end
-
-
-// 
-always@(posedge clk or negedge rst)
-begin
-    if(!rst)
-        function_mode	<=	0;
-    else if( function_mode == 8 )
-        function_mode <= 'b0;
-    else if( key_out[0] )
-        function_mode	<=	function_mode	+	5'd1;	
-end
-
-
-// 
-always@(posedge clk or negedge rst)
-begin
+// 旋转模式的角度调节
+always@(posedge clk or negedge rst) begin
     if(!rst)
         angle_temp	<=	9'b0;
     else if( angle_temp == 0 && key_out[1] )
@@ -255,29 +219,84 @@ begin
 end
 
 
+// 划定有效像素的边界，每帧的边界行列均显示特定颜色
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        wr_data_border <= 'd0;
+    end
+    else if(wr_data_border >= 16'hefff) begin
+        wr_data_border <= 16'h1111;
+    end
+    else if(write_read_len == IMAGE_SIZE) begin
+        wr_data_border <= wr_data_border + 16'h1111;
+    end
+    else begin
+        wr_data_border <= 16'h1111;
+    end
+end
+
+
+// 对写回的数据进行操作，有效值直接赋值，其他部分置零
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        wr_data_reg <= 'b0;
+    end
+    // 在缩放模式下，对缩放后的有效像素边界行和列添加特定颜色的边界
+    /*else if((x_cnt == VIDEO_WIDTH / scale_value) || (y_cnt == VIDEO_HEIGHT / scale_value)) begin
+        wr_data_reg <= {4{wr_data_border}};
+    end
+    // 在旋转模式下，在行列的中部分别添加特定颜色边界，将屏幕划分为 4 份
+    else if(((x_cnt == VIDEO_WIDTH / 2) || (y_cnt == VIDEO_HEIGHT / 2)) && (function_mode == 1)) begin
+        wr_data_reg <= {4{wr_data_border}};
+    end*/
+    else if((y_cnt >= VIDEO_HEIGHT / scale_value) || (x_cnt >= VIDEO_WIDTH / scale_value)) begin
+        wr_data_reg <= 'b0;
+    end
+    else if((x_cnt < x_shift_cnt) || (y_cnt < y_shift_cnt)) begin	
+        wr_data_reg <= 'b0;	
+    end
+    else if((x_rotate > VIDEO_WIDTH) || (y_rotate >= VIDEO_HEIGHT)) begin
+        wr_data_reg <= 'hdddd;
+    end
+    else if((state == MEM_READ) && (rd_ready == 1'b1)) begin
+        wr_data_reg <= rd_data;
+    end
+    else begin
+        wr_data_reg <= 'b0;
+    end
+end
+
+
 always@(posedge clk or negedge rst)
 begin
-    if(!rst)
-        rd_addr 		<='h000000;
-    else if( write_read_len == IMAGE_SIZE )
-        rd_addr 		<='h000000;
-    else case( function_mode )
-        0	:	
-            rd_addr 	<= 	rd_burst_addr_start	+	write_read_len;
-        1	:	
-            rd_addr 	<= 	rd_burst_addr_start	+	x_rotate	+	VIDEO_WIDTH*y_rotate;
+    if(!rst) begin
+        rd_addr <= 'h000000;
+    end
+    else if(write_read_len == IMAGE_SIZE) begin
+        rd_addr <= 'h000000; 
+    end
+    else begin
+        case(function_mode)
+            DEFAULT_MODE: begin
+                rd_addr <= rd_burst_addr_start + write_read_len;
+            end
+            ROTATE_MODE: begin
+                rd_addr <= rd_burst_addr_start + x_rotate + VIDEO_WIDTH * y_rotate;
+            end
         2	:	
             rd_addr 	<= 	rd_burst_addr_start	+	x_cnt	+	VIDEO_WIDTH*y_cnt    - x_shift_cnt ;	
         3	:	
             rd_addr 	<= 	rd_burst_addr_start	+	x_cnt	+	VIDEO_WIDTH*y_cnt    -   VIDEO_WIDTH*y_shift_cnt;
         4	:	
             rd_addr 	<= 	rd_burst_addr_start	+	scale_value*x_cnt	+	scale_value*VIDEO_WIDTH*y_cnt;                
-        default:	
-            rd_addr 	<= 	rd_burst_addr_start	+	write_read_len;	
-    
-    endcase
+            default: begin
+                rd_addr 	<= 	rd_burst_addr_start	+	write_read_len;	
+            end
+        endcase
+    end
 end
         
+
 always@(posedge clk or negedge rst)
 begin
     if(!rst)

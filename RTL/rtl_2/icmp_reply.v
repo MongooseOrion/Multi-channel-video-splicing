@@ -329,11 +329,12 @@ always @(posedge clk or negedge rst_n)
     .wr_addr(ram_write_addr),
     .wr_en(ram_wr_en),
     .wr_clk(clk),
-    .wr_rst(~rst_n),
     .rd_addr(icmp_rec_ram_read_addr),
     .rd_data(icmp_rec_ram_rdata),
     .rd_clk(clk),
-    .rd_rst(~rst_n));
+    .rst(~rst_n));
+
+
 //***************************************************************************//
 //verify checksum 32 bit adder, in the end, add itself until high 16 bit is 0
 //** ************************************************************************//

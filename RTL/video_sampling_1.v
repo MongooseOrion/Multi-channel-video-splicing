@@ -39,15 +39,15 @@ module video_sampling_1#(
     input               de_in,
     input               vs_in,
     input       [15:0]  rgb565_in,
-    // DDR 存储
+    // 发往 DDR 存储
     input                                   rd_clk,
     input       [RD_ADDR_LEN - 1'b1 : 0]    rd_addr,
     output      [DQ_WIDTH*8-1'b1:0]         rd_data,
     input                                   rd_valid,
     output reg                              data_out_ready,
     output reg  [3:0]                       trans_id,
-    output reg                              row_end_flag,
-    output reg                              frame_end_flag
+    output reg                              row_end_flag,   // 可能不止一个时钟周期，可只取第一个周期
+    output reg                              frame_end_flag  // 同上
 );
 
 parameter COLUMN_NUM_QD = VIDEO_WIDTH / 'd4;
@@ -63,14 +63,15 @@ reg [WR_ADDR_LEN - 1'b1 : 0]    wr_addr;
 reg                             wr_en_tr;
 reg                             wr_en_final;
 reg [15:0]                      wr_data_temp;
-reg [DQ_WIDTH-1'b1:0]           wr_data;
+reg [DQ_WIDTH - 1'b1:0]         wr_data;
 reg [1:0]                       data_len_cnt;   // 存入 DRAM 的单个数据为两个 RGB565 像素
 reg                             vs_in_1;
 reg                             frame_valid;
 reg                             de_in_1;
 reg [1:0]                       href_count;
 reg [2:0]                       pix_count;
-reg [15:0]                      pix_full_count;
+reg [31:0]                      pix_full_count;
+reg                             pix_full_count_en;
 reg                             rd_valid_d1;
 reg [1:0]                       rd_valid_count;
 
@@ -223,6 +224,8 @@ always @(posedge clk or negedge rst) begin
     end
 end
 
+
+// 将两个像素存进一个数据信号中
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
         wr_data <= 'b0;
@@ -321,7 +324,7 @@ always @(posedge clk or negedge rst) begin
     end
     else if(rd_valid_d1) begin
         if(rd_valid_count == 2'd1) begin
-            if(wr_addr >= 'd128) begin
+            if(wr_addr >= (DQ_WIDTH*8*16/32)) begin
                 data_out_ready <= 1'b1;
             end
             else begin
@@ -346,27 +349,44 @@ always @(posedge clk or negedge rst) begin
 end
 
 
-// 行结束标志
+// 像素计数，按 buffer 读通道为准
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        pix_full_count_en <= 'b0;
+    end
+    else if(data_out_ready) begin
+        pix_full_count_en <= 1'b1;
+    end
+    else if(pix_full_count % 16 == 1'b0) begin
+        pix_full_count_en <= 1'b0;
+    end
+    else begin
+        pix_full_count_en <= pix_full_count_en;
+    end
+end
+
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
         pix_full_count <= 'b0;
     end
-    else if(wr_en_tr) begin
+    else if(pix_full_count_en) begin
         pix_full_count <= pix_full_count + 1'b1;
     end
-    else if(pix_full_count == (COLUMN_NUM_QD*ROW_NUM_QD)) begin
-        pix_full_count <= 16'd0;
+    else if(pix_full_count == (COLUMN_NUM_QD * ROW_NUM_QD)) begin
+        pix_full_count <= 32'd0;
     end
     else begin
         pix_full_count <= pix_full_count;
     end
 end
 
+
+// 行结束标志
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
         row_end_flag <= 'b0;
     end
-    else if((pix_full_count + 1'b1) % COLUMN_NUM_QD == 'b0) begin
+    else if(pix_full_count % COLUMN_NUM_QD == 'b0) begin   // 与最后一个像素同步拉高
         row_end_flag <= 1'b1;
     end
     else begin
@@ -380,7 +400,7 @@ always @(posedge clk or negedge rst) begin
     if(!rst) begin
         frame_end_flag <= 'b0;
     end
-    else if(pix_full_count == COLUMN_NUM_QD * ROW_NUM_QD - 1'b1) begin
+    else if(pix_full_count == COLUMN_NUM_QD * ROW_NUM_QD) begin
         frame_end_flag <= 1'b1;
     end
     else begin

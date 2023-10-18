@@ -25,12 +25,13 @@
 */
 // 对各图像输入数据模块进行循环 AXI 输入，以将各图像保存到不同的 ddr 地址区域
 
-module axi_arbitrate_wr #(
+module axi_arbitrate #(
     parameter MEM_ROW_WIDTH        = 15    ,
     parameter MEM_COLUMN_WIDTH     = 10    ,
     parameter MEM_BANK_WIDTH       = 3     ,
     parameter CTRL_ADDR_WIDTH = MEM_ROW_WIDTH + MEM_BANK_WIDTH + MEM_COLUMN_WIDTH,
     parameter M_ADDR_WIDTH      = 5'd5,             // FIFO 读通道位宽
+    parameter S_ADDR_WIDTH      = 6'd40,
     parameter AXI_ADDR_WIDTH    = 6'd27,
     parameter DQ_WIDTH          = 12'd32,
     parameter LEN_WIDTH         = 12'd16,
