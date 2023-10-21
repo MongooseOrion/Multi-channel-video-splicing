@@ -104,8 +104,9 @@ reg [15:0]  ultimate_data_in;
 
 
 // 相机 1 1/16
-video_sampling_1 #(
-    .IMAGE_TAG          (4'd1)
+video_sampling #(
+    .IMAGE_TAG          (4'd1),
+    .SEL_MODE           (2'd1)
 )video_sampling_cmos1 (
     .clk                (cmos1_pclk),
     .rst                (rst),
@@ -122,8 +123,9 @@ video_sampling_1 #(
 
 
 // 相机 2 1/16
-video_sampling_1 #(
-    .IMAGE_TAG          (4'd2)
+video_sampling #(
+    .IMAGE_TAG          (4'd2),
+    .SEL_MODE           (2'd1)
 )video_sampling_cmos2 (
     .clk                (cmos2_pclk),
     .rst                (rst),
@@ -140,8 +142,9 @@ video_sampling_1 #(
 
 
 // 相机融合 1/16
-video_sampling_1 #(
-    .IMAGE_TAG          (4'd3)
+video_sampling #(
+    .IMAGE_TAG          (4'd3),
+    .SEL_MODE           (2'd1)
 )video_sampling_cmos_fusion (
     .clk                (cmos_fusion_pclk),
     .rst                (rst),
@@ -158,8 +161,9 @@ video_sampling_1 #(
 
 
 // HDMI 1/16
-video_sampling_1 #(
-    .IMAGE_TAG          (4'd4)
+video_sampling #(
+    .IMAGE_TAG          (4'd4),
+    .SEL_MODE           (2'd1)
 )video_sampling_hdmi (
     .clk                (hdmi_pclk),
     .rst                (rst),
@@ -212,8 +216,9 @@ always @(*) begin
     endcase
 end
 
-video_sampling_2 #(
-    .IMAGE_TAG          (4'd5)
+video_sampling #(
+    .IMAGE_TAG          (4'd5),
+    .SEL_MODE           (2'd2)
 )video_sampling_ultimate (
     .clk_in             (ultimate_clk_in),
     .rst                (rst),

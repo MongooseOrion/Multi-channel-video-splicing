@@ -25,13 +25,14 @@
 // 对上 1/4 高度画面进行操作，将画面缩小到 1/16
 // 输入规格：1280x720
 
-module video_sampling_1#(
+module video_sampling#(
     parameter WR_ADDR_LEN = 'd8, 
     parameter RD_ADDR_LEN = 'd5,
     parameter IMAGE_TAG = 4'd1,
     parameter DQ_WIDTH = 12'd32,
     parameter VIDEO_WIDTH = 'd1280,
-    parameter VIDEO_HEIGHT = 'd720
+    parameter VIDEO_HEIGHT = 'd720,
+    parameter SEL_MODE = 'd1            // 1:四抽三（1/16），2:四抽一(9/16)
 )(
     input               clk,
     input               rst,
@@ -55,14 +56,18 @@ parameter ROW_NUM_QD = VIDEO_HEIGHT / 'd4;
 
 wire        pose_vs_in;
 wire        nege_vs_in;
-wire        wr_en;
+wire        wr_en_1;
+wire        wr_en_2;
 wire        pose_rd_valid;
 
 reg [WR_ADDR_LEN - 1'b1 : 0]    wr_addr_temp;
 reg [WR_ADDR_LEN - 1'b1 : 0]    wr_addr;
 reg                             wr_en_tr;
+reg                             wr_en_tr_d1;
 reg                             wr_en_final;
-reg [15:0]                      wr_data_temp;
+reg [15:0]                      wr_data_d1;
+reg [15:0]                      wr_data_d2;
+reg [15:0]                      wr_data_d3;
 reg [DQ_WIDTH - 1'b1:0]         wr_data;
 reg [1:0]                       data_len_cnt;   // 存入 DRAM 的单个数据为两个 RGB565 像素
 reg                             vs_in_1;
@@ -150,96 +155,185 @@ end
         wr_en <= 1'b0;
     end
 end*/
-assign wr_en = ((href_count == 4'd1) && (de_in_1 == 1'b1)) ? 1'b1 : 1'b0;
+assign wr_en_1 = ((href_count == 4'd1) && (de_in_1 == 1'b1)) ? 1'b1 : 1'b0;
+assign wr_en_2 = ((href_count < 4'd4) && (de_in_1 == 1'b1)) ? 1'b1 : 1'b0;
 
 
-// 每五个像素丢中间三个像素数据
-always @(posedge clk or negedge rst) begin
-    if(!rst) begin
-        pix_count <= 'b0;
-    end
-    else if(wr_en) begin
-        if(pix_count == 2'd3) begin
-            pix_count <= 2'd0;
+// 每四个像素丢三个像素数据，或者每四个丢一个
+generate
+    if(SEL_MODE == 2'd1) begin
+        always @(posedge clk or negedge rst) begin
+            if(!rst) begin
+                pix_count <= 'b0;
+            end
+            else if(wr_en_1) begin
+                if(pix_count == 2'd3) begin
+                    pix_count <= 2'd0;
+                end
+                else begin
+                    pix_count <= pix_count + 1'b1;
+                end
+            end
+            else begin
+                pix_count <= 2'b0;
+            end
         end
-        else begin
-            pix_count <= pix_count + 1'b1;
+    end
+    else if(SEL_MODE == 2'd2) begin
+        always @(posedge clk or negedge rst) begin
+            if(!rst) begin
+                pix_count <= 'b0;
+            end
+            else if(wr_en_2) begin
+                if(pix_count == 2'd3) begin
+                    pix_count <= 2'd0;
+                end
+                else begin
+                    pix_count <= pix_count + 1'b1;
+                end
+            end
+            else begin
+                pix_count <= 2'b0;
+            end
         end
     end
-    else begin
-        pix_count <= 2'b0;
-    end
-end
+endgenerate
 
 
 // 实际写使能信号
+generate
+    if(SEL_MODE == 2'd1) begin
+        always @(posedge clk or negedge rst) begin
+            if(!rst) begin
+                wr_en_tr <= 'b0;
+            end
+            else if((wr_en_1 == 1'b1) && (pix_count == 2'd0)) begin
+                wr_en_tr <= 1'b1;
+            end
+            else begin
+                wr_en_tr <= 1'b0;
+            end
+        end
+    end
+    else if(SEL_MODE == 2'd2) begin
+        always @(posedge clk or negedge rst) begin
+            if(!rst) begin
+                wr_en_tr <= 'b0;
+            end
+            else if((wr_en_2 == 1'b1) && (pix_count < 2'd3)) begin
+                wr_en_tr <= 1'b1;
+            end
+            else begin
+                wr_en_tr <= 1'b0;
+            end
+        end
+    end
+endgenerate
+
+
+// 补足写数据延迟
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
-        wr_en_tr <= 'b0;
-    end
-    else if((wr_en == 1'b1) && (pix_count == 2'd0)) begin
-        wr_en_tr <= 1'b1;
-    end
-    else begin
-        wr_en_tr <= 1'b0;
-    end
-end
-// 补足写数据 1 个延迟
-always @(posedge clk or negedge rst) begin
-    if(!rst) begin
+        wr_en_tr_d1 <= 'b0;
         wr_en_final <= 'b0;
     end
     else begin
-        wr_en_final <= wr_en_tr;
+        wr_en_tr_d1 <= wr_en_tr;
+        wr_en_final <= wr_en_tr_d1;
     end
 end
 
 
-// 写数据 RGR565 像素个数计数
-always @(posedge clk or negedge rst) begin
-    if(!rst) begin
-        data_len_cnt <= 'b0;
-    end
-    else if((wr_en == 1'b1) && (pix_count == 2'd0)) begin
-        if(data_len_cnt == 2'd2) begin
-            data_len_cnt <= 2'd1;
+// 写数据 RGR565 有效像素 2 个为 1 组计数
+generate
+    if(SEL_MODE == 2'd1) begin
+        always @(posedge clk or negedge rst) begin
+            if(!rst) begin
+                data_len_cnt <= 'b0;
+            end
+            else if(wr_en_tr) begin
+                if(data_len_cnt == 2'd2) begin
+                    data_len_cnt <= 2'd1;
+                end
+                else begin
+                    data_len_cnt <= data_len_cnt + 1'b1;
+                end
+            end
+            else begin
+                data_len_cnt <= data_len_cnt;
+            end
         end
-        else begin
-            data_len_cnt <= data_len_cnt + 1'b1;
+    end
+    else if(SEL_MODE == 2'd2) begin
+        always @(posedge clk or negedge rst) begin
+            if(!rst) begin
+                data_len_cnt <= 'b0;
+            end
+            else if(wr_en_tr) begin
+                if(data_len_cnt == 2'd2) begin
+                    data_len_cnt <= 2'd1;
+                end
+                else begin
+                    data_len_cnt <= data_len_cnt + 1'b1;
+                end
+            end
+            else begin
+                data_len_cnt <= data_len_cnt;
+            end
         end
     end
-    else begin
-        data_len_cnt <= data_len_cnt;
-    end
-end
+endgenerate
 
 
-// 写数据信号，该片段造成两个单位延迟 
+// 写数据信号，设置一个信号暂存数据 
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
-        wr_data_temp <= 'b0;
+        wr_data_d1 <= 'b0;
+        wr_data_d2 <= 'b0;
+        wr_data_d3 <= 'b0;
     end
     else begin
-        wr_data_temp <= rgb565_in;
+        wr_data_d1 <= rgb565_in;
+        wr_data_d2 <= wr_data_d1;
+        wr_data_d3 <= wr_data_d2;
     end
 end
 
-
-// 将两个像素存进一个数据信号中
-always @(posedge clk or negedge rst) begin
-    if(!rst) begin
-        wr_data <= 'b0;
+// 将两个像素数据写入一个写数据信号中
+generate
+    if(SEL_MODE == 2'd1) begin
+        always @(posedge clk or negedge rst) begin
+            if(!rst) begin
+                wr_data <= 'b0;
+            end
+            else if((wr_en_tr_d1 == 1'b1) && (data_len_cnt == 2'd1)) begin
+                wr_data <= {16'b0,wr_data_d3};
+            end
+            else if((wr_en_tr_d1 == 1'b1) && (data_len_cnt == 2'd2)) begin
+                wr_data <= {wr_data_d3,wr_data[15:0]};        // 后来的数据放前面
+            end
+            else begin
+                wr_data <= wr_data;
+            end
+        end
     end
-    else if((wr_en == 1'b1) && (pix_count == 2'd0)) begin
-        wr_data <= {16'b0,wr_data_temp};
+    else if(SEL_MODE == 2'd2) begin
+        always @(posedge clk or negedge rst) begin
+            if(!rst) begin
+                wr_data <= 'b0;
+            end
+            else if((wr_en_tr_d1 == 1'b1) && (data_len_cnt == 2'd1)) begin
+                wr_data <= {16'b0,wr_data_d3};
+            end
+            else if((wr_en_tr_d1 == 1'b1) && (data_len_cnt == 2'd2)) begin
+                wr_data <= {wr_data_d3,wr_data[15:0]};        // 后来的数据放前面
+            end
+            else begin
+                wr_data <= wr_data;
+            end
+        end
     end
-    else if(data_len_cnt == 2'd2) begin
-        wr_data <= {wr_data_temp,wr_data[15:0]};        // 后来的数据放前面
-    end
-    else begin
-        wr_data <= wr_data;
-    end
-end
+endgenerate
 
 
 // 写地址信号
@@ -267,7 +361,7 @@ end
 
 sdram_sampling wr_buffer(
     .wr_data    (wr_data),      // input [31:0]
-    .wr_addr    (wr_addr),      // input [5:0]
+    .wr_addr    (wr_addr),      // input [7:0]
     .wr_en      (wr_en_final),        // input
     .wr_clk     (clk),          // input
     .wr_rst     (!rst),         // input
@@ -313,7 +407,7 @@ always @(posedge clk or negedge rst) begin
         end
     end
     else begin
-    rd_valid_count <= rd_valid_count;
+        rd_valid_count <= rd_valid_count;
     end
 end
 
@@ -332,7 +426,7 @@ always @(posedge clk or negedge rst) begin
             end
         end
         else if(rd_valid_count == 2'd2) begin
-            if(wr_addr >= 'd0) begin
+            if((wr_addr >= 'd0) && (wr_addr < (DQ_WIDTH*8*16/32))) begin
                 data_out_ready <= 1'b1;
             end
             else begin
@@ -386,7 +480,7 @@ always @(posedge clk or negedge rst) begin
     if(!rst) begin
         row_end_flag <= 'b0;
     end
-    else if(pix_full_count % COLUMN_NUM_QD == 'b0) begin   // 与最后一个像素同步拉高
+    else if((pix_full_count + 1'b1) % COLUMN_NUM_QD == 'b0) begin   // 与最后一个像素同步拉高
         row_end_flag <= 1'b1;
     end
     else begin
@@ -400,7 +494,7 @@ always @(posedge clk or negedge rst) begin
     if(!rst) begin
         frame_end_flag <= 'b0;
     end
-    else if(pix_full_count == COLUMN_NUM_QD * ROW_NUM_QD) begin
+    else if((pix_full_count + 1'b1) == COLUMN_NUM_QD * ROW_NUM_QD) begin
         frame_end_flag <= 1'b1;
     end
     else begin

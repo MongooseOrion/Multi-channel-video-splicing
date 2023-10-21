@@ -60,6 +60,7 @@ wire        pose_rd_valid;
 reg [WR_ADDR_LEN - 1'b1 : 0]    wr_addr_temp;
 reg [WR_ADDR_LEN - 1'b1 : 0]    wr_addr;
 reg                             wr_en_tr;
+reg                             wr_en_tr_d1;
 reg                             wr_en_final;
 reg [1:0]                       data_len_cnt;
 reg [15:0]                      wr_data_temp;
@@ -69,6 +70,7 @@ reg                             frame_valid;
 reg                             de_in_1;
 reg [1:0]                       href_count;
 reg [2:0]                       pix_count;
+reg                             pix_full_count_en;
 reg [15:0]                      pix_full_count;
 reg                             rd_valid_d1;
 reg [1:0]                       rd_valid_count;
@@ -182,13 +184,15 @@ always @(posedge clk_in or negedge rst) begin
         wr_en_tr <= 1'b0;
     end
 end
-// 补足写数据 1 个延迟
+// 补足写数据延迟
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
+        wr_en_tr_d1 <= 'b0;
         wr_en_final <= 'b0;
     end
     else begin
-        wr_en_final <= wr_en_tr;
+        wr_en_tr_d1 <= wr_en_tr;
+        wr_en_final <= wr_en_tr_d1;
     end
 end
 
@@ -226,10 +230,10 @@ always @(posedge clk or negedge rst) begin
     if(!rst) begin
         wr_data <= 'b0;
     end
-    else if((wr_en == 1'b1) && (pix_count < 2'd3)) begin
+    else if((wr_en == 1'b1) && (pix_count < 2'd3) && (data_len_cnt == 2'd1)) begin
         wr_data <= {16'b0,wr_data_temp};
     end
-    else if(data_len_cnt == 2'd2) begin
+    else if((data_len_cnt == 2'd2) && (pix_count < 2'd3)) begin
         wr_data <= {wr_data_temp,wr_data[15:0]};        // 后来的数据放前面
     end
     else begin
@@ -309,7 +313,7 @@ always @(posedge clk or negedge rst) begin
         end
     end
     else begin
-    rd_valid_count <= rd_valid_count;
+        rd_valid_count <= rd_valid_count;
     end
 end
 
@@ -319,7 +323,7 @@ always @(posedge clk or negedge rst) begin
     end
     else if(rd_valid_d1) begin
         if(rd_valid_count == 2'd1) begin
-            if(wr_addr >= 'd128) begin
+            if(wr_addr >= (DQ_WIDTH*8*16/32)) begin
                 data_out_ready <= 1'b1;
             end
             else begin
@@ -327,7 +331,7 @@ always @(posedge clk or negedge rst) begin
             end
         end
         else if(rd_valid_count == 2'd2) begin
-            if(wr_addr >= 'd0) begin
+            if((wr_addr >= 'd0) && (wr_addr < (DQ_WIDTH*8*16/32))) begin
                 data_out_ready <= 1'b1;
             end
             else begin
@@ -340,6 +344,23 @@ always @(posedge clk or negedge rst) begin
     end
     else begin
         data_out_ready <= 1'b0;
+    end
+end
+
+
+// 像素计数，按 buffer 读通道为准
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        pix_full_count_en <= 'b0;
+    end
+    else if(data_out_ready) begin
+        pix_full_count_en <= 1'b1;
+    end
+    else if(pix_full_count % 16 == 1'b0) begin
+        pix_full_count_en <= 1'b0;
+    end
+    else begin
+        pix_full_count_en <= pix_full_count_en;
     end
 end
 

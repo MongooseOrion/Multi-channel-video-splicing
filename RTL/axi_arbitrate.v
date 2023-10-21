@@ -47,30 +47,35 @@ module axi_arbitrate #(
     output reg                          channel1_rvalid,
     input                               channel1_rready,
     input       [DQ_WIDTH*8-1'b1:0]     channel1_data,
+    input                               frame_end_flag_1,
     // 通道 2
     output reg                          channel2_clk,
     output reg  [M_ADDR_WIDTH-1'b1:0]   channel2_addr,
     output reg                          channel2_rvalid,
     input                               channel2_rready,
     input       [DQ_WIDTH*8-1'b1:0]     channel2_data,
+    input                               frame_end_flag_2,
     // 通道 3
     output reg                          channel3_clk,
     output reg  [M_ADDR_WIDTH-1'b1:0]   channel3_addr,
     output reg                          channel3_rvalid,
     input                               channel3_rready,
     input       [DQ_WIDTH*8-1'b1:0]     channel3_data,
+    input                               frame_end_flag_3,
     // 通道 4
     output reg                          channel4_clk,
     output reg  [M_ADDR_WIDTH-1'b1:0]   channel4_addr,
     output reg                          channel4_rvalid,
     input                               channel4_rready,
     input       [DQ_WIDTH*8-1'b1:0]     channel4_data,
+    input                               frame_end_flag_4,
     // 通道 5
     output reg                          channel5_clk,
     output reg  [M_ADDR_WIDTH-1'b1:0]   channel5_addr,
     output reg                          channel5_rvalid,
     input                               channel5_rready,
     input       [DQ_WIDTH*8-1'b1:0]     channel5_data,
+    input                               frame_end_flag_5,
 
     // AXI WRITE INTERFACE
     output [CTRL_ADDR_WIDTH-1:0]        axi_awaddr      ,
@@ -89,7 +94,22 @@ module axi_arbitrate #(
 
     input  [3 : 0]                      axi_bid         ,
     input                               axi_bvalid      ,
-    output                              axi_bready      
+    output                              axi_bready      ,
+
+    // AXI READ INTERFACE
+    output                              axi_arvalid     ,  
+    input                               axi_arready     , 
+    output [CTRL_ADDR_WIDTH-1:0]        axi_araddr      ,  
+    output [3:0]                        axi_arid        ,  
+    output [3:0]                        axi_arlen       ,  
+    output [2:0]                        axi_arsize      ,  
+    output [1:0]                        axi_arburst     ,  
+                                                         
+    output                              axi_rready      ,  
+    input  [DQ_WIDTH*8-1:0]             axi_rdata       ,  
+    input                               axi_rvalid      ,  
+    input                               axi_rlast       ,  
+    input  [3:0]                        axi_rid         
 );
 
 parameter   INIT_WAIT = 4'b0000,       // 定义读取状态
@@ -102,6 +122,13 @@ parameter   INIT_WAIT = 4'b0000,       // 定义读取状态
             CH_4 = 4'b0111,
             CH5_WAIT = 4'b1000,
             CH_5 = 4'b1001;
+// 地址偏移量
+parameter FRAME_ADDR_OFFSET = 'd40960;
+parameter   ADDR_OFFSET_1 = 'd0,                    // 0-40959, 40960-81919
+            ADDR_OFFSET_2 = FRAME_ADDR_OFFSET * 2,  // 81920-122879, 122880-163839
+            ADDR_OFFSET_3 = ADDR_OFFSET_2 * 2,      // 
+            ADDR_OFFSET_4 = ADDR_OFFSET_3 * 2,
+            ADDR_OFFSET_5 = ADDR_OFFSET_4 * 2;
 
 reg [CTRL_ADDR_WIDTH-1:0]       reg_axi_awaddr  ;
 reg                             reg_axi_awvalid ;
@@ -112,6 +139,11 @@ reg                             reg_axi_bready  ;
 reg [3:0]           state;
 reg                 axi_wr_en;
 reg [4:0]           burst_len_count;
+reg [1:0]           frame_addr_count_1;
+reg [1:0]           frame_addr_count_2;
+reg [1:0]           frame_addr_count_3;
+reg [1:0]           frame_addr_count_4;
+reg [1:0]           frame_addr_count_5;
 
 assign axi_awaddr   = reg_axi_awaddr        ;
 assign axi_awvalid  = reg_axi_awvalid       ;
@@ -124,6 +156,10 @@ assign axi_wvalid   = reg_axi_wvalid        ;
 assign axi_wstrb    = {DQ_WIDTH{1'b1}}      ;
 assign axi_bready   = reg_axi_bready        ;
 
+
+// 
+// 写部分
+//
 
 // 取数据状态机跳转
 always @(posedge clk or negedge rst) begin
@@ -391,7 +427,7 @@ end
 
 
 // AXI 写首地址生成
-always @(posedge clk or negedge rst) begin
+/*always @(posedge clk or negedge rst) begin
     if(!rst) begin
         reg_axi_awaddr <= 'b0;
     end
@@ -401,7 +437,7 @@ always @(posedge clk or negedge rst) begin
     else begin
         reg_axi_awaddr <= reg_axi_awaddr;
     end
-end
+end*/
 
 
 // 向外（buffer）发出读地址请求，这必须在 AXI 总线的 wvalid 拉高后马上送
@@ -413,6 +449,7 @@ always @(posedge clk or negedge rst) begin
         channel4_addr <= 'b0;
         channel5_addr <= 'b0;
         reg_axi_wdata <= 'b0;
+        reg_axi_awaddr <= 'b0;
     end
     else if((axi_wvalid == 1'b1) && (axi_wready == 1'b1)) begin
         case(state)
@@ -424,6 +461,23 @@ always @(posedge clk or negedge rst) begin
                     channel1_addr <= channel1_addr;
                 end
                 reg_axi_wdata <= channel1_data;
+                if(frame_end_flag_1) begin                  
+                    if(frame_addr_count_1 == 2'd2) begin        // 每帧结束地址偏移计数信号
+                        frame_addr_count_1 <= 2'b1;
+                    end
+                    else begin
+                        frame_addr_count_1 <= frame_addr_count_1 + 1'b1;
+                    end
+                end
+                else begin
+                    frame_addr_count_1 <= frame_addr_count_1;
+                end
+                if() begin            // 添加地址偏移量
+                    reg_axi_awaddr <= ADDR_OFFSET_1;
+                end
+                else if(frame_addr_count_1 == 2'd2)begin
+                    reg_axi_awaddr <= ADDR_OFFSET_1 + FRAME_ADDR_OFFSET + reg_axi_awaddr + LEN_WIDTH;
+                end
             end
             CH_2: begin
                 if(burst_len_count <= LEN_WIDTH - 1'b1) begin
@@ -480,5 +534,13 @@ always @(posedge clk or negedge rst) begin
         reg_axi_wdata <= reg_axi_wdata;
     end
 end
+
+
+// 
+// 读部分
+//
+
+// 
+
 
 endmodule
