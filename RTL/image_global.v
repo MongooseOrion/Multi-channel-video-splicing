@@ -237,4 +237,8 @@ video_sampling #(
 // 上述内容循环仲裁从 AXI 写入 DDR
 axi_arbitrate_wr u_axi_arbitrate_wr();
 
+
+// 从 DDR 读出给 buffer，以便 HDMI 显示
+axi_arbitrate_rd u_axi_arbitrate_rd(); 
+
 endmodule

@@ -25,7 +25,7 @@
 */
 // 对各图像输入数据模块进行循环 AXI 输入，以将各图像保存到不同的 ddr 地址区域
 
-module axi_arbitrate #(
+module axi_arbitrate_wr #(
     parameter MEM_ROW_WIDTH        = 15    ,
     parameter MEM_COLUMN_WIDTH     = 10    ,
     parameter MEM_BANK_WIDTH       = 3     ,
@@ -92,24 +92,9 @@ module axi_arbitrate #(
     output                              axi_wvalid      ,
     input                               axi_wready      ,
 
-    input  [3 : 0]                      axi_bid         ,
+    input  [3:0]                        axi_bid         ,
     input                               axi_bvalid      ,
-    output                              axi_bready      ,
-
-    // AXI READ INTERFACE
-    output                              axi_arvalid     ,  
-    input                               axi_arready     , 
-    output [CTRL_ADDR_WIDTH-1:0]        axi_araddr      ,  
-    output [3:0]                        axi_arid        ,  
-    output [3:0]                        axi_arlen       ,  
-    output [2:0]                        axi_arsize      ,  
-    output [1:0]                        axi_arburst     ,  
-                                                         
-    output                              axi_rready      ,  
-    input  [DQ_WIDTH*8-1:0]             axi_rdata       ,  
-    input                               axi_rvalid      ,  
-    input                               axi_rlast       ,  
-    input  [3:0]                        axi_rid         
+    output                              axi_bready      
 );
 
 parameter   INIT_WAIT = 4'b0000,       // 定义读取状态
@@ -135,15 +120,21 @@ reg                             reg_axi_awvalid ;
 reg [DQ_WIDTH*8-1'b1:0]         reg_axi_wdata   ;
 reg                             reg_axi_wvalid  ;
 reg                             reg_axi_bready  ;
+reg                             reg_axi_rready  ;
 
-reg [3:0]           state;
-reg                 axi_wr_en;
-reg [4:0]           burst_len_count;
-reg [1:0]           frame_addr_count_1;
-reg [1:0]           frame_addr_count_2;
-reg [1:0]           frame_addr_count_3;
-reg [1:0]           frame_addr_count_4;
-reg [1:0]           frame_addr_count_5;
+reg [3:0]                       buf_rd_state        ;
+reg                             axi_wr_en           ;
+reg [4:0]                       burst_len_count     ;
+reg [1:0]                       frame_addr_count_1  ;
+reg [1:0]                       frame_addr_count_2  ;
+reg [1:0]                       frame_addr_count_3  ;
+reg [1:0]                       frame_addr_count_4  ;
+reg [1:0]                       frame_addr_count_5  ;
+reg [CTRL_ADDR_WIDTH-1:0]       reg_axi_awaddr_1    ;
+reg [CTRL_ADDR_WIDTH-1:0]       reg_axi_awaddr_2    ;
+reg [CTRL_ADDR_WIDTH-1:0]       reg_axi_awaddr_3    ;
+reg [CTRL_ADDR_WIDTH-1:0]       reg_axi_awaddr_4    ;
+reg [CTRL_ADDR_WIDTH-1:0]       reg_axi_awaddr_5    ;
 
 assign axi_awaddr   = reg_axi_awaddr        ;
 assign axi_awvalid  = reg_axi_awvalid       ;
@@ -157,98 +148,99 @@ assign axi_wstrb    = {DQ_WIDTH{1'b1}}      ;
 assign axi_bready   = reg_axi_bready        ;
 
 
-// 
-// 写部分
-//
-
 // 取数据状态机跳转
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
-        state <= 'b0;
+        buf_rd_state <= 'b0;
     end
     else begin
-        case(state)
+        case(buf_rd_state)
             INIT_WAIT: begin
                 if(channel1_rready) begin
-                    state <= CH_1;
+                    buf_rd_state <= CH_1;
                 end
                 else begin
-                    state <= INIT_WAIT;
+                    buf_rd_state <= INIT_WAIT;
                 end
             end
             CH_1: begin
-                if((axi_bready == 1'b1) && (axi_bvalid == 1'b1))begin
-                    state <= CH2_WAIT;
+                //if((axi_bready == 1'b1) && (axi_bvalid == 1'b1)) begin
+                if(axi_wlast) begin
+                    buf_rd_state <= CH2_WAIT;
                 end
                 else begin
-                    state <= state;
+                    buf_rd_state <= buf_rd_state;
                 end
             end
             CH2_WAIT: begin
                 if(channel2_rready) begin
-                    state <= CH_2;
+                    buf_rd_state <= CH_2;
                 end
                 else begin
-                    state <= state;
+                    buf_rd_state <= buf_rd_state;
                 end
             end
             CH_2: begin
-                if((axi_bready == 1'b1) && (axi_bvalid == 1'b1))begin
-                    state <= CH_3;
+                //if((axi_bready == 1'b1) && (axi_bvalid == 1'b1)) begin
+                if(axi_wlast) begin
+                    buf_rd_state <= CH_3;
                 end
                 else begin
-                    state <= state;
+                    buf_rd_state <= buf_rd_state;
                 end
             end
             CH3_WAIT: begin
                 if(channel3_rready) begin
-                    state <= CH_3;
+                    buf_rd_state <= CH_3;
                 end
                 else begin
-                    state <= state;
+                    buf_rd_state <= buf_rd_state;
                 end
             end
             CH_3: begin
-                if((axi_bready == 1'b1) && (axi_bvalid == 1'b1))begin
-                    state <= CH4_WAIT;
+                //if((axi_bready == 1'b1) && (axi_bvalid == 1'b1)) begin
+                if(axi_wlast) begin
+                    buf_rd_state <= CH4_WAIT;
                 end
                 else begin
-                    state <= state;
+                    buf_rd_state <= buf_rd_state;
                 end
             end
             CH4_WAIT: begin
                 if(channel4_rready) begin
-                    state <= CH_4;
+                    buf_rd_state <= CH_4;
                 end
                 else begin
-                    state <= state;
+                    buf_rd_state <= buf_rd_state;
                 end
             end
             CH_4: begin
-                if((axi_bready == 1'b1) && (axi_bvalid == 1'b1))begin
-                    state <= CH5_WAIT;
+                //if((axi_bready == 1'b1) && (axi_bvalid == 1'b1))begin
+                if(axi_wlast) begin
+                    buf_rd_state <= CH5_WAIT;
                 end
                 else begin
-                    state <= state;
+                    buf_rd_state <= buf_rd_state;
                 end
             end
             CH5_WAIT: begin
                 if(channel1_rready) begin
-                    state <= CH_5;
+                    buf_rd_state <= CH_5;
                 end
                 else begin
-                    state <= state;
+                    buf_rd_state <= buf_rd_state;
                 end
             end
             CH_5: begin
-                if((axi_bready == 1'b1) && (axi_bvalid == 1'b1)) begin
-                    state <= INIT_WAIT;
+                //if((axi_bready == 1'b1) && (axi_bvalid == 1'b1)) begin
+                if(axi_wlast) begin
+                    buf_rd_state <= INIT_WAIT;
                 end
                 else begin
-                    state <= state;
+                    buf_rd_state <= buf_rd_state;
                 end
             end
-            default: state <= INIT_WAIT;
+            default: buf_rd_state <= INIT_WAIT;
         endcase
     end
 end
@@ -266,7 +258,7 @@ always @(posedge clk or negedge rst) begin
         reg_axi_awvalid <= 'b0;
     end
     else begin
-        case(state)
+        case(buf_rd_state)
             INIT_WAIT: begin
                 if(channel1_rready) begin
                     channel1_rvalid <= 1'b0;
@@ -449,10 +441,20 @@ always @(posedge clk or negedge rst) begin
         channel4_addr <= 'b0;
         channel5_addr <= 'b0;
         reg_axi_wdata <= 'b0;
+        frame_addr_count_1 <= 'b0;
+        frame_addr_count_2 <= 'b0;
+        frame_addr_count_3 <= 'b0;
+        frame_addr_count_4 <= 'b0;
+        frame_addr_count_5 <= 'b0;
+        reg_axi_awaddr_1 <= 'b0;
+        reg_axi_awaddr_2 <= 'b0;
+        reg_axi_awaddr_3 <= 'b0;
+        reg_axi_awaddr_4 <= 'b0;
+        reg_axi_awaddr_5 <= 'b0;
         reg_axi_awaddr <= 'b0;
     end
     else if((axi_wvalid == 1'b1) && (axi_wready == 1'b1)) begin
-        case(state)
+        case(buf_rd_state)
             CH_1: begin
                 if(burst_len_count <= LEN_WIDTH - 1'b1) begin
                     channel1_addr <= channel1_addr + 1'b1;
@@ -462,8 +464,8 @@ always @(posedge clk or negedge rst) begin
                 end
                 reg_axi_wdata <= channel1_data;
                 if(frame_end_flag_1) begin                  
-                    if(frame_addr_count_1 == 2'd2) begin        // 每帧结束地址偏移计数信号
-                        frame_addr_count_1 <= 2'b1;
+                    if(frame_addr_count_1 == 2'd1) begin        // 每帧结束地址偏移计数信号
+                        frame_addr_count_1 <= 2'b0;
                     end
                     else begin
                         frame_addr_count_1 <= frame_addr_count_1 + 1'b1;
@@ -472,11 +474,17 @@ always @(posedge clk or negedge rst) begin
                 else begin
                     frame_addr_count_1 <= frame_addr_count_1;
                 end
-                if() begin            // 添加地址偏移量
-                    reg_axi_awaddr <= ADDR_OFFSET_1;
+                if(frame_addr_count_1 == 2'd0) begin            // 首地址加上偏移量
+                    reg_axi_awaddr_1 <= reg_axi_awaddr_1 + LEN_WIDTH;
+                    reg_axi_awaddr <= ADDR_OFFSET_1 + reg_axi_awaddr_1;
                 end
-                else if(frame_addr_count_1 == 2'd2)begin
-                    reg_axi_awaddr <= ADDR_OFFSET_1 + FRAME_ADDR_OFFSET + reg_axi_awaddr + LEN_WIDTH;
+                else if(frame_addr_count_1 == 2'd1) begin
+                    reg_axi_awaddr_1 <= reg_axi_awaddr_1 + LEN_WIDTH;
+                    reg_axi_awaddr <= ADDR_OFFSET_1 + FRAME_ADDR_OFFSET + reg_axi_awaddr_1;
+                end
+                else begin
+                    reg_axi_awaddr_1 <= reg_axi_awaddr_1;
+                    reg_axi_awaddr <= reg_axi_awaddr;
                 end
             end
             CH_2: begin
@@ -487,6 +495,29 @@ always @(posedge clk or negedge rst) begin
                     channel2_addr <= channel2_addr;
                 end
                 reg_axi_wdata <= channel2_data;
+                if(frame_end_flag_2) begin                  
+                    if(frame_addr_count_2 == 2'd1) begin        // 每帧结束地址偏移计数信号
+                        frame_addr_count_2 <= 2'b0;
+                    end
+                    else begin
+                        frame_addr_count_2 <= frame_addr_count_2 + 1'b1;
+                    end
+                end
+                else begin
+                    frame_addr_count_2 <= frame_addr_count_2;
+                end
+                if(frame_addr_count_2 == 2'd0) begin            // 首地址加上偏移量
+                    reg_axi_awaddr_2 <= reg_axi_awaddr_2 + LEN_WIDTH;
+                    reg_axi_awaddr <= ADDR_OFFSET_2 + reg_axi_awaddr_2;
+                end
+                else if(frame_addr_count_2 == 2'd1) begin
+                    reg_axi_awaddr_2 <= reg_axi_awaddr_2 + LEN_WIDTH;
+                    reg_axi_awaddr <= ADDR_OFFSET_2 + FRAME_ADDR_OFFSET + reg_axi_awaddr_2;
+                end
+                else begin
+                    reg_axi_awaddr_2 <= reg_axi_awaddr_2;
+                    reg_axi_awaddr <= reg_axi_awaddr;
+                end
             end
             CH_3: begin
                 if(burst_len_count <= LEN_WIDTH - 1'b1) begin
@@ -496,6 +527,29 @@ always @(posedge clk or negedge rst) begin
                     channel3_addr <= channel3_addr;
                 end
                 reg_axi_wdata <= channel3_data;
+                if(frame_end_flag_3) begin                  
+                    if(frame_addr_count_3 == 2'd1) begin        // 每帧结束地址偏移计数信号
+                        frame_addr_count_3 <= 2'b0;
+                    end
+                    else begin
+                        frame_addr_count_3 <= frame_addr_count_3 + 1'b1;
+                    end
+                end
+                else begin
+                    frame_addr_count_3 <= frame_addr_count_3;
+                end
+                if(frame_addr_count_3 == 2'd0) begin            // 首地址加上偏移量
+                    reg_axi_awaddr_3 <= reg_axi_awaddr_3 + LEN_WIDTH;
+                    reg_axi_awaddr <= ADDR_OFFSET_3 + reg_axi_awaddr_3;
+                end
+                else if(frame_addr_count_3 == 2'd1) begin
+                    reg_axi_awaddr_3 <= reg_axi_awaddr_3 + LEN_WIDTH;
+                    reg_axi_awaddr <= ADDR_OFFSET_3 + FRAME_ADDR_OFFSET + reg_axi_awaddr_3;
+                end
+                else begin
+                    reg_axi_awaddr_3 <= reg_axi_awaddr_3;
+                    reg_axi_awaddr <= reg_axi_awaddr;
+                end
             end
             CH_4: begin
                 if(burst_len_count <= LEN_WIDTH - 1'b1) begin
@@ -505,6 +559,29 @@ always @(posedge clk or negedge rst) begin
                     channel4_addr <= channel4_addr;
                 end
                 reg_axi_wdata <= channel4_data;
+                if(frame_end_flag_4) begin                  
+                    if(frame_addr_count_4 == 2'd1) begin        // 每帧结束地址偏移计数信号
+                        frame_addr_count_4 <= 2'b0;
+                    end
+                    else begin
+                        frame_addr_count_4 <= frame_addr_count_4 + 1'b1;
+                    end
+                end
+                else begin
+                    frame_addr_count_4 <= frame_addr_count_4;
+                end
+                if(frame_addr_count_4 == 2'd0) begin            // 首地址加上偏移量
+                    reg_axi_awaddr_4 <= reg_axi_awaddr_4 + LEN_WIDTH;
+                    reg_axi_awaddr <= ADDR_OFFSET_4 + reg_axi_awaddr_4;
+                end
+                else if(frame_addr_count_4 == 2'd1) begin
+                    reg_axi_awaddr_4 <= reg_axi_awaddr_4 + LEN_WIDTH;
+                    reg_axi_awaddr <= ADDR_OFFSET_4 + FRAME_ADDR_OFFSET + reg_axi_awaddr_4;
+                end
+                else begin
+                    reg_axi_awaddr_4 <= reg_axi_awaddr_4;
+                    reg_axi_awaddr <= reg_axi_awaddr;
+                end
             end
             CH_5: begin
                 if(burst_len_count <= LEN_WIDTH - 1'b1) begin
@@ -514,6 +591,29 @@ always @(posedge clk or negedge rst) begin
                     channel5_addr <= channel5_addr;
                 end
                 reg_axi_wdata <= channel5_data;
+                if(frame_end_flag_5) begin                  
+                    if(frame_addr_count_5 == 2'd1) begin        // 每帧结束地址偏移计数信号
+                        frame_addr_count_5 <= 2'b0;
+                    end
+                    else begin
+                        frame_addr_count_5 <= frame_addr_count_5 + 1'b1;
+                    end
+                end
+                else begin
+                    frame_addr_count_5 <= frame_addr_count_5;
+                end
+                if(frame_addr_count_5 == 2'd0) begin            // 首地址加上偏移量
+                    reg_axi_awaddr_5 <= reg_axi_awaddr_5 + LEN_WIDTH;
+                    reg_axi_awaddr <= ADDR_OFFSET_5 + reg_axi_awaddr_5;
+                end
+                else if(frame_addr_count_5 == 2'd1) begin
+                    reg_axi_awaddr_5 <= reg_axi_awaddr_5 + LEN_WIDTH;
+                    reg_axi_awaddr <= ADDR_OFFSET_5 + FRAME_ADDR_OFFSET + reg_axi_awaddr_5;
+                end
+                else begin
+                    reg_axi_awaddr_5 <= reg_axi_awaddr_5;
+                    reg_axi_awaddr <= reg_axi_awaddr;
+                end
             end
             default: begin
                 channel1_addr <= channel1_addr;
@@ -522,6 +622,17 @@ always @(posedge clk or negedge rst) begin
                 channel4_addr <= channel4_addr;
                 channel5_addr <= channel5_addr;
                 reg_axi_wdata <= reg_axi_wdata;
+                frame_addr_count_1 <= frame_addr_count_1;
+                frame_addr_count_2 <= frame_addr_count_2;
+                frame_addr_count_3 <= frame_addr_count_3;
+                frame_addr_count_4 <= frame_addr_count_4;
+                frame_addr_count_5 <= frame_addr_count_5;
+                reg_axi_awaddr_1 <= reg_axi_awaddr_1;
+                reg_axi_awaddr_2 <= reg_axi_awaddr_2;
+                reg_axi_awaddr_3 <= reg_axi_awaddr_3;
+                reg_axi_awaddr_4 <= reg_axi_awaddr_4;
+                reg_axi_awaddr_5 <= reg_axi_awaddr_5;
+                reg_axi_awaddr <= reg_axi_awaddr;
             end
         endcase
     end
@@ -532,15 +643,19 @@ always @(posedge clk or negedge rst) begin
         channel4_addr <= channel4_addr;
         channel5_addr <= channel5_addr;
         reg_axi_wdata <= reg_axi_wdata;
+        frame_addr_count_1 <= frame_addr_count_1;
+        frame_addr_count_2 <= frame_addr_count_2;
+        frame_addr_count_3 <= frame_addr_count_3;
+        frame_addr_count_4 <= frame_addr_count_4;
+        frame_addr_count_5 <= frame_addr_count_5;
+        reg_axi_awaddr_1 <= reg_axi_awaddr_1;
+        reg_axi_awaddr_2 <= reg_axi_awaddr_2;
+        reg_axi_awaddr_3 <= reg_axi_awaddr_3;
+        reg_axi_awaddr_4 <= reg_axi_awaddr_4;
+        reg_axi_awaddr_5 <= reg_axi_awaddr_5;
+        reg_axi_awaddr <= reg_axi_awaddr;
     end
 end
-
-
-// 
-// 读部分
-//
-
-// 
-
+                                                                                                                                                                            
 
 endmodule

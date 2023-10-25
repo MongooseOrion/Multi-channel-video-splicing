@@ -41,17 +41,29 @@ module video_fusion(
     output reg [15:0]   cmos_fusion_data       
 );
 
-// 设置行场同步信号的延迟数，这与 almost_full 有关
-parameter DELAY = 4'd8;
+// 设置合适的行场同步信号的延迟数，FIFO almost_full参数同步设置
+parameter DELAY = 6'd50; 
+// 设置两个cmos横向偏移的延迟像素个数(即两个读使能信号偏移时的时钟周期数)
+parameter DELAY_en =5'd8;
 
-wire [15:0] rd_cmos1;
-wire [15:0] rd_cmos2;
-wire        almost_full_1;
-wire        almost_full_2;
+wire [15:0]             rd_cmos1;
+wire [15:0]             rd_cmos2;
+wire                    almost_full_1;
+wire                    almost_full_2;
+wire                    cmos1_posedge_flag;
+wire                    cmos2_posedge_flag;
+wire                    rd_en_2;
 
-reg                     rd_en;
+reg                     rd_en_1;
 reg [(DELAY-2'd1):0]    reg_delay_1;
 reg [(DELAY-2'd1):0]    reg_delay_2;
+reg [(DELAY_en-2'd1):0] reg_delay_en;
+
+reg                     cmos1_href_reg;
+reg                     cmos2_href_reg;
+
+assign cmos1_posedge_flag=(~cmos1_href_reg)&cmos1_href;
+assign cmos2_posedge_flag=(~cmos2_href_reg)&cmos2_href;
 
 
 // 缓存 CMOS_1 数据
@@ -61,14 +73,15 @@ fifo_cam fifo_cam_1(
     .full           (),                    // output
     .almost_full    (almost_full_1),      // output
     .rd_data        (rd_cmos1),              // output [15:0]
-    .rd_en          (rd_en),                  // input
+    .rd_en          (rd_en_1),                  // input
     .empty          (),                  // output
     .almost_empty   (),    // output
     .wr_clk         (cmos1_pclk),                      // input
     .rd_clk         (cmos1_pclk),
-    .wr_rst         (),                       // input
-    .rd_rst         ()
+    .wr_rst         (!rst),                       // input
+    .rd_rst         (!rst)
 );
+
 
 // 缓存 CMOS_2 数据
 fifo_cam fifo_cam_2(
@@ -77,29 +90,61 @@ fifo_cam fifo_cam_2(
     .full           (),                    // output
     .almost_full    (almost_full_2),      // output
     .rd_data        (rd_cmos2),              // output [15:0]
-    .rd_en          (rd_en),                  // input
+    .rd_en          (rd_en_2),                  // input
     .empty          (),                  // output
     .almost_empty   (),    // output
     .wr_clk         (cmos2_pclk),                      // input
     .rd_clk         (cmos1_pclk),
-    .wr_rst         (),
-    .rd_rst         ()     
+    .wr_rst         (!rst),
+    .rd_rst         (!rst)     
 );
+
+//两个cmos行有效信号打一拍
+always @(posedge cmos1_pclk or negedge rst) begin
+    if(!rst) begin
+        cmos1_href_reg <= 'b0;
+    end
+    else
+        cmos1_href_reg <= cmos1_href;
+end
+
+always @(posedge cmos2_pclk or negedge rst) begin
+    if(!rst) begin
+        cmos2_href_reg <= 'b0;
+    end
+    else
+        cmos2_href_reg <= cmos2_href;
+end
 
 
 // 读使能
 // 两个信号的 almost_full 上升沿检测并相或
 always @(posedge cmos1_pclk or negedge rst) begin
     if(!rst) begin
-        rd_en <= 'b0;
+        rd_en_1 <= 'b0;
+    end
+    else if (cmos1_posedge_flag|cmos2_posedge_flag) begin
+        rd_en_1 <= 1'b0;
     end
     else if(almost_full_1 || almost_full_2)begin
-        rd_en <= 1'b1;
+        rd_en_1 <= 1'b1;
     end
     else begin
-        rd_en <= rd_en;
+        rd_en_1 <= rd_en_1;
     end
 end
+
+
+//CMOS2读使能延时10个时钟
+always @(posedge cmos1_pclk or negedge rst) begin
+    if(!rst) begin
+        reg_delay_en <= 'b0;
+    end
+    else begin
+        reg_delay_en <= {reg_delay_en[(DELAY_en-2'd2):0],rd_en_1};
+    end
+end
+assign rd_en_2 = reg_delay_en[DELAY_en-1'b1];
 
 
 // 融合图像
@@ -116,7 +161,7 @@ always @(posedge cmos1_pclk or negedge rst) begin
                             (rd_cmos1[15:11]>>1)+(rd_cmos2[15:11]>>1)};*/
     end
 end
-// CMOS1（相对）靠上大约 80 像素，靠右 5 像素，后续需处理
+// CMOS1（相对）靠上大约 80 像素，靠右 13 像素，后续需处理
 
 
 // 行场同步信号延迟处理
