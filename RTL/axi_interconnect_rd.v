@@ -470,7 +470,12 @@ always @(posedge clk or negedge rst) begin
 end
 
 
-// 
+// 把数据传入读 buf 中等待 hdmi 时序取数据
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        
+    end
+end
 
 
 endmodule
