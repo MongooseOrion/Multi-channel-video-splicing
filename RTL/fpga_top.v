@@ -346,7 +346,7 @@ hdmi_data_in u_hdmi_data_in(
 
 
 //
-// 图像数据多窗口处理
+// 图像数据多路载入
 image_global multi_image_load(
     .rst                    (ddr_init_done),
     .command_in             (command_out),

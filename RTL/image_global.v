@@ -220,11 +220,11 @@ video_sampling #(
     .IMAGE_TAG          (4'd5),
     .SEL_MODE           (2'd2)
 )video_sampling_ultimate (
-    .clk_in             (ultimate_clk_in),
+    .clk                (ultimate_clk_in),
     .rst                (rst),
     .vs_in              (ultimate_vs_in),
     .de_in              (ultimate_de_in),
-    .data_in            (ultimate_data_in),
+    .rgb565_in          (ultimate_data_in),
     .rd_clk             (),
     .rd_addr            (),
     .rd_valid           (),
@@ -235,10 +235,14 @@ video_sampling #(
 
 
 // 上述内容循环仲裁从 AXI 写入 DDR
-axi_arbitrate_wr u_axi_arbitrate_wr();
+axi_interconnect_wr u_axi_interconnect_wr();
 
 
 // 从 DDR 读出给 buffer，以便 HDMI 显示
-axi_arbitrate_rd u_axi_arbitrate_rd(); 
+axi_interconnect_rd u_axi_interconnect_rd(); 
+
+
+// 输出数据缓存 buf
+ddr_rd_buf u_ddr_rd_buf();
 
 endmodule
