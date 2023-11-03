@@ -68,7 +68,7 @@ wire            hdmi_vs_out;
 wire  [15:0]    hdmi_data_out;
 
 
-video_sampling_1 #(
+video_sampling #(
     .OUT_OFFSET         (11'd0)
 ) video_sampling_cmos1 (
     .clk                (cmos1_pclk_16bit),
@@ -81,7 +81,7 @@ video_sampling_1 #(
     .rgb565_out         (cmos1_data_out)
 );
 
-video_sampling_1 #(
+video_sampling #(
     OUT_OFFSET          (11'd320)
 ) video_sampling_cmos2 (
     .clk                (cmos1_pclk_16bit),
@@ -94,7 +94,7 @@ video_sampling_1 #(
     .rgb565_out         (cmos2_data_out)
 );
 
-video_sampling_1 #(
+video_sampling #(
     OUT_OFFSET          (11'd640)
 ) video_sampling_cmos_fusion (
     .clk                (cmos1_pclk_16bit),
@@ -107,7 +107,7 @@ video_sampling_1 #(
     .rgb565_out         (cmos_fusion_data_out)
 );
 
-video_sampling_1 #(
+video_sampling #(
     OUT_OFFSET          (11'd960)
 ) video_sampling_hdmi (
     .clk                (cmos1_pclk_16bit),

@@ -24,13 +24,13 @@
 * ========================================================================
 */
 // 对各图像输入数据模块进行循环 AXI 输入，以将各图像保存到不同的 ddr 地址区域
-
-module axi_arbitrate_wr #(
+//
+module axi_interconnect_wr #(
     parameter MEM_ROW_WIDTH        = 15    ,
     parameter MEM_COLUMN_WIDTH     = 10    ,
     parameter MEM_BANK_WIDTH       = 3     ,
     parameter CTRL_ADDR_WIDTH = MEM_ROW_WIDTH + MEM_BANK_WIDTH + MEM_COLUMN_WIDTH,
-    parameter M_ADDR_WIDTH      = 5'd5,             // FIFO 读通道位宽
+    parameter M_ADDR_WIDTH      = 5'd5,             // buf 读通道位宽
     parameter S_ADDR_WIDTH      = 6'd40,
     parameter AXI_ADDR_WIDTH    = 6'd27,
     parameter DQ_WIDTH          = 12'd32,
@@ -42,40 +42,42 @@ module axi_arbitrate_wr #(
     input                               clk,                // ddr core clk
     input                               rst,
     // 通道 1
-    output reg                          channel1_clk,
-    output reg  [M_ADDR_WIDTH-1'b1:0]   channel1_addr,
-    output reg                          channel1_rvalid,
-    input                               channel1_rready,
-    input       [DQ_WIDTH*8-1'b1:0]     channel1_data,
+    output                              channel1_clk    ,
+    output reg  [M_ADDR_WIDTH-1'b1:0]   channel1_addr   ,
+    output reg                          channel1_rvalid ,
+    input                               channel1_rready ,
+    input       [DQ_WIDTH*8-1'b1:0]     channel1_data   ,
     input                               frame_end_flag_1,
     // 通道 2
-    output reg                          channel2_clk,
-    output reg  [M_ADDR_WIDTH-1'b1:0]   channel2_addr,
-    output reg                          channel2_rvalid,
-    input                               channel2_rready,
-    input       [DQ_WIDTH*8-1'b1:0]     channel2_data,
+    output                              channel2_clk    ,
+    output reg  [M_ADDR_WIDTH-1'b1:0]   channel2_addr   ,
+    output reg                          channel2_rvalid ,
+    input                               channel2_rready ,
+    input       [DQ_WIDTH*8-1'b1:0]     channel2_data   ,
     input                               frame_end_flag_2,
     // 通道 3
-    output reg                          channel3_clk,
-    output reg  [M_ADDR_WIDTH-1'b1:0]   channel3_addr,
-    output reg                          channel3_rvalid,
-    input                               channel3_rready,
-    input       [DQ_WIDTH*8-1'b1:0]     channel3_data,
+    output                              channel3_clk    ,
+    output reg  [M_ADDR_WIDTH-1'b1:0]   channel3_addr   ,
+    output reg                          channel3_rvalid ,
+    input                               channel3_rready ,
+    input       [DQ_WIDTH*8-1'b1:0]     channel3_data   ,
     input                               frame_end_flag_3,
     // 通道 4
-    output reg                          channel4_clk,
-    output reg  [M_ADDR_WIDTH-1'b1:0]   channel4_addr,
-    output reg                          channel4_rvalid,
-    input                               channel4_rready,
-    input       [DQ_WIDTH*8-1'b1:0]     channel4_data,
+    output                              channel4_clk    ,
+    output reg  [M_ADDR_WIDTH-1'b1:0]   channel4_addr   ,
+    output reg                          channel4_rvalid ,
+    input                               channel4_rready ,
+    input       [DQ_WIDTH*8-1'b1:0]     channel4_data   ,
     input                               frame_end_flag_4,
     // 通道 5
-    output reg                          channel5_clk,
-    output reg  [M_ADDR_WIDTH-1'b1:0]   channel5_addr,
-    output reg                          channel5_rvalid,
-    input                               channel5_rready,
-    input       [DQ_WIDTH*8-1'b1:0]     channel5_data,
+    output                              channel5_clk    ,
+    output reg  [M_ADDR_WIDTH-1'b1:0]   channel5_addr   ,
+    output reg                          channel5_rvalid ,
+    input                               channel5_rready ,
+    input       [DQ_WIDTH*8-1'b1:0]     channel5_data   ,
     input                               frame_end_flag_5,
+
+    output reg                          axi_rd_en       ,
 
     // AXI WRITE INTERFACE
     output [CTRL_ADDR_WIDTH-1:0]        axi_awaddr      ,
@@ -144,6 +146,12 @@ reg [CTRL_ADDR_WIDTH-1:0]       reg_axi_awaddr_2    ;
 reg [CTRL_ADDR_WIDTH-1:0]       reg_axi_awaddr_3    ;
 reg [CTRL_ADDR_WIDTH-1:0]       reg_axi_awaddr_4    ;
 reg [CTRL_ADDR_WIDTH-1:0]       reg_axi_awaddr_5    ;
+
+assign channel1_clk = clk   ;
+assign channel2_clk = clk   ;
+assign channel3_clk = clk   ;
+assign channel4_clk = clk   ;
+assign channel5_clk = clk   ;
 
 assign axi_awaddr   = reg_axi_awaddr        ;
 assign axi_awvalid  = reg_axi_awvalid       ;
@@ -799,6 +807,23 @@ always @(*) begin
         CH_5: reg_axi_wdata <= pose_axi_wready ? channel5_data_d1 : channel5_data;
         default: reg_axi_wdata <= 'b0;
     endcase
+end
+
+
+// 指示 axi 可读
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        axi_rd_en <= 'b0;
+    end
+    else if(frame_addr_count_4 == 2'd2) begin
+        axi_rd_en <= 1'b1;
+    end
+    else if(frame_addr_count_4 == 2'd1) begin
+        axi_rd_en <= 1'b0;
+    end
+    else begin
+        axi_rd_en <= axi_rd_en;
+    end
 end
                                                                                                                                                                             
 

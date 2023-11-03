@@ -96,6 +96,13 @@ module fpga_top#(
     output reg  [7:0]                       r_out           , 
     output reg  [7:0]                       g_out           , 
     output reg  [7:0]                       b_out           ,
+    // RJ45                       
+    output      [3:0]                       rgmii_txd       ,//RGMII 发送数据
+    output                                  rgmii_txctl     ,//RGMII 发送有效信号
+    output                                  rgmii_txc       ,//125Mhz ethernet rgmii tx clock
+    input       [3:0]                       rgmii_rxd       ,//RGMII 接收数据
+    input                                   rgmii_rxctl     ,//RGMII 接收数据有效信号
+    input                                   rgmii_rxc       ,//125Mhz ethernet rgmii RX clock
     // UART
     input                                   uart_rx         ,
     output                                  uart_tx
@@ -109,8 +116,10 @@ parameter TH_1S = 27'd33000000; // 心跳 LED 灯计数
 wire                        cfg_clk             ;
 wire                        clk_25M             ;
 wire                        clk_50M             ;
-wire [7:0]                  command_out         ;
+wire [3:0]                  ctrl_command   ;
+wire [3:0]                  value_command  ;
 wire [7:0]                  command_in          ;
+wire                        command_in_flag     ;
 wire                        cmos_scl            ;   //cmos i2c clock
 wire                        cmos_sda            ;   //cmos i2c data
 wire                        cmos_vsync          ;   //cmos vsync
@@ -140,6 +149,12 @@ wire [15:0]                 rgb565_1            ;
 wire [15:0]                 rgb565_2            ;
 wire                        de_re               ;
 wire                        de_o                ;
+wire                        hs_o                ;
+wire                        vs_o                ;
+wire                        video_vsync         ;
+wire                        video_hsync         ;
+wire                        video_href          ;
+wire [15:0]                 video_data_in       ;
 
 reg  [15:0]                 rstn_1ms            ;
 reg                         cmos1_href_d0       ;
@@ -193,10 +208,14 @@ pll_top clock_manager (
 //
 // UART 指令控制，[7:4] 指令通道，[3:0] 值通道
 uart_trans command_ctrl(
-    .clk            (sys_clk),
-    .rst            (sys_rst),
-    .uart_rx        (uart_rx),
-    .uart_tx        (uart_tx)
+    .clk                    (sys_clk),
+    .rst                    (sys_rst),
+    .uart_rx                (uart_rx),
+    .uart_tx                (uart_tx),
+    .command_in             (command_in     ),  // 用于传回电脑校验信号
+    .command_in_flag        (command_in_flag),
+    .ctrl_command_out       (ctrl_command ),
+    .value_command_out      (value_command)
 );
 
 
@@ -241,7 +260,7 @@ power_on_delay	power_on_delay_inst(
     .initial_en              (initial_en) 		
 );
 // Camera_1
-reg_config	coms1_reg_config(
+reg_config	cmos1_reg_config(
     .clk_25M                 (clk_25M),             //input
     .camera_rstn             (cmos1_reset),         //input
     .initial_en              (initial_en),          //input		
@@ -253,7 +272,7 @@ reg_config	coms1_reg_config(
 );
 
 // Camera_2
-reg_config	coms2_reg_config(
+reg_config	cmos2_reg_config(
     .clk_25M                 (clk_25M            ),//input
     .camera_rstn             (cmos2_reset        ),//input
     .initial_en              (initial_en         ),//input		
@@ -348,8 +367,10 @@ hdmi_data_in u_hdmi_data_in(
 //
 // 图像数据多路载入
 image_global multi_image_load(
+    .ddr_clk                (core_clk),
     .rst                    (ddr_init_done),
-    .command_in             (command_out),
+    .ctrl_command_in        (ctrl_command),
+    .value_command_in       (value_command),
 
     .cmos1_pclk             (cmos1_pclk_16bit   ),
     .cmos1_href             (cmos1_href_16bit   ),
@@ -368,51 +389,51 @@ image_global multi_image_load(
     .hdmi_vsync             (hdmi_vs_out),
     .hdmi_pix_data          (rgb565_hdmi),
 
-    .vesa_out_clk           (),
+    .vesa_out_clk           (pix_clk_out),
     .rd_fsync               (),
-    .rd_en                  (),
-    .vesa_out_de            (),
-    .vesa_out_data          (),
+    .rd_en                  (de_re),
+    .de_o                   (video_href),
+    .vesa_out_data          (video_data_in),
 
-    .axi_awaddr             (),
-    .axi_awid               (),
-    .axi_awlen              (),
-    .axi_awsize             (),
-    .axi_awburst            (),
-    .axi_awready            (),
-    .axi_awvalid            (),
-    .axi_wdata              (),
-    .axi_wstrb              (),
-    .axi_wlast              (),
-    .axi_wvalid             (),
-    .axi_wready             (),
-    .axi_bid                (),
-    .axi_araddr             (),
-    .axi_arid               (),
-    .axi_arlen              (),
-    .axi_arsize             (),
-    .axi_arburst            (),
-    .axi_arvalid            (),
-    .axi_arready            (),
-    .axi_rready             (),
-    .axi_rdata              (),
-    .axi_rvalid             (),
-    .axi_rlast              (),
-    .axi_rid                ()
+    .axi_awaddr             (axi_awaddr     ),
+    .axi_awid               (axi_awid       ),
+    .axi_awlen              (axi_awlen      ),
+    .axi_awsize             (axi_awsize     ),
+    .axi_awburst            (axi_awburst    ),
+    .axi_awready            (axi_awready    ),
+    .axi_awvalid            (axi_awvalid    ),
+    .axi_wdata              (axi_wdata      ),
+    .axi_wstrb              (axi_wstrb      ),
+    .axi_wlast              (axi_wlast      ),
+    .axi_wvalid             (axi_wvalid     ),
+    .axi_wready             (axi_wready     ),
+    .axi_bid                (axi_bid        ),
+    .axi_araddr             (axi_araddr     ),
+    .axi_arid               (axi_arid       ),
+    .axi_arlen              (axi_arlen      ),
+    .axi_arsize             (axi_arsize     ),
+    .axi_arburst            (axi_arburst    ),
+    .axi_arvalid            (axi_arvalid    ),
+    .axi_arready            (axi_arready    ),
+    .axi_rready             (axi_rready     ),
+    .axi_rdata              (axi_rdata      ),
+    .axi_rvalid             (axi_rvalid     ),
+    .axi_rlast              (axi_rlast      ),
+    .axi_rid                (axi_rid        )
 );
 
 
 //
 // 强制缩小画面
 /*video_sampling_1 video_sampling(
-    .clk                (cmos1_pclk_16bit),
-    .rst                (sys_rst),
-    .de_in              (cmos_fusion_href),
-    .vs_in              (cmos_fusion_vsync),
-    .rgb565_in          (cmos_fusion_data),
-    .de_out             (de_in_buf),
-    .vs_out             (vs_in_buf),
-    .rgb565_out         (i_rgb565)
+    .clk                (cmos1_pclk_16bit   ),
+    .rst                (sys_rst            ),
+    .de_in              (cmos_fusion_href   ),
+    .vs_in              (cmos_fusion_vsync  ),
+    .rgb565_in          (cmos_fusion_data   ),
+    .de_out             (de_in_buf          ),
+    .vs_out             (vs_in_buf          ),
+    .rgb565_out         (i_rgb565           )
 );*/
 
 
@@ -484,13 +505,38 @@ end
 //
 // 产生 HDMI_VESA 协议时序 
 sync_vg sync_vg(                            
-    .clk            (pix_clk_out),      //input                   clk,                                 
-    .rstn           (init_done),        //input                   rstn,                            
-    .vs_out         (vs_o),             //output reg              vs_out,                                                                                                                                      
-    .hs_out         (hs_o),             //output reg              hs_out,            
-    .de_out         (),                 //output reg              de_out, 
-    .de_re          (de_re)    
-); 
+    .clk            (pix_clk_out    ),      //input                   clk,                                 
+    .rstn           (1'b1     ),        //input                   rstn,                            
+    .vs_out         (video_vsync    ),             //output reg              vs_out,                                                                                                                                      
+    .hs_out         (video_hsync    ),             //output reg              hs_out,            
+    .de_out         (),                     //output reg              de_out, 
+    .de_re          (de_re          )    
+);
+
+
+//
+// 网口字符数据传入，接在最后输出的视频信息上
+ethernet_character u_ethernet_character(
+    .sys_clk                (clk_50M),         		 
+    .rst_n		            (sys_rst),
+
+    .video_clk	            (pix_clk_out),
+    .video_vsync            (video_vsync  ),   
+    .video_hsync            (video_hsync  ),      
+    .video_href             (video_href   ),
+    .video_data_in          (video_data_in),
+    .hdmi_vsync             (vs_o),
+    .hdmi_hsync             (hs_o),
+    .hdmi_href              (de_o),
+    .hdmi_data              (o_rgb565),
+
+    .rgmii_txd              (rgmii_txd   ),
+    .rgmii_txctl            (rgmii_txctl ),
+    .rgmii_txc              (rgmii_txc   ),
+    .rgmii_rxd              (rgmii_rxd   ),
+    .rgmii_rxctl            (rgmii_rxctl ),
+    .rgmii_rxc              (rgmii_rxc   )
+);
 
 
 //
