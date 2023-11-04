@@ -33,14 +33,17 @@ module axi_interconnect_rd #(
     parameter DQ_WIDTH          = 12'd32    ,
     parameter H_HEIGHT = 'd720              ,
     parameter H_WIDTH = 'd1280              ,
-    parameter BURST_LEN = 'd20
+    parameter BURST_LEN = 'd10
 )(
     input                               clk             ,
     input                               rst             ,
 
+    // hdmi 时序相关信号
+    input                               hdmi_vsync      ,
+    input                               hdmi_href       ,
+
     // 输出数据给 buffer
     input                               axi_wr_buf_wait ,   // 必须提前拉高并持续一段时间
-    input                               axi_rd_en       ,
     input  [1:0]                        channel_sel     ,
     output                              buf_wr_en       ,
     output [DQ_WIDTH*8-1:0]             buf_wr_data     ,    
@@ -65,16 +68,17 @@ parameter WIDTH_QD = H_WIDTH / 4;
 parameter HEIGHT_QD = H_HEIGHT / 4;
 parameter WIDTH_TC = H_WIDTH * 3/4;
 parameter HEIGHT_TC = H_HEIGHT * 3/4;
-parameter   WR1_WAIT = 4'b0000,              // AXI 读状态机
-            WR_1 = 4'b0001,
-            WR2_WAIT = 4'b0010,
-            WR_2 = 4'b0011,
-            WR3_WAIT = 4'b0100,
-            WR_3 = 4'b0101,
-            WR4_WAIT = 4'b0110,
-            WR_4 = 4'b0111,
-            WR5_WAIT = 4'b1000,
-            WR_5 = 4'b1001;
+parameter   INIT_WAIT = 4'b0000,              // AXI 读状态机
+            WR1_WAIT = 4'b0001,
+            WR_1 = 4'b0010,
+            WR2_WAIT = 4'b0011,
+            WR_2 = 4'b0100,
+            WR3_WAIT = 4'b0101,
+            WR_3 = 4'b0110,
+            WR4_WAIT = 4'b0111,
+            WR_4 = 4'b1000,
+            WR5_WAIT = 4'b1001,
+            WR_5 = 4'b1010;
 // 地址偏移量
 parameter FRAME_ADDR_OFFSET = 'd40960;
 parameter   ADDR_OFFSET_1 = 'd0,                    // 0-40959, 40960-81919
@@ -84,6 +88,9 @@ parameter   ADDR_OFFSET_1 = 'd0,                    // 0-40959, 40960-81919
             ADDR_OFFSET_5 = ADDR_OFFSET_4 + 2 * (FRAME_ADDR_OFFSET);
 
 wire                            nege_axi_wr_wait;
+wire                            nege_vsync      ;
+wire                            pose_vsync      ;
+wire                            nege_href       ;
 
 reg [CTRL_ADDR_WIDTH-1:0]       reg_axi_araddr  ;
 reg                             reg_axi_arvalid ;
@@ -91,8 +98,13 @@ reg                             reg_axi_rready  ;
 reg [DQ_WIDTH*8-1:0]            reg_axi_rdata   ;
 
 reg                             axi_wr_buf_wait_d1;
+reg                             reg_vsync_d1    ;
+reg                             reg_href_d1     ;
+reg                             row_end_flag_1  ;
+reg                             row_end_flag_2  ;
+reg                             axi_rd_en       ;
 reg                             frame_en        ;
-reg [9:0]                       hsync_count     ;
+reg [9:0]                       vsync_count     ;
 reg [9:0]                       pix_count_qd    ;
 reg [9:0]                       pix_count_tc    ;
 reg                             sel2_en         ;
@@ -110,21 +122,71 @@ reg [1:0]                       frame_count_5   ;
 
 assign axi_arvalid  = reg_axi_arvalid       ;
 assign axi_araddr   = reg_axi_araddr        ;
-assign axi_awlen    = BURST_LEN - 1'b1      ;   // 突发长度：20
+assign axi_awlen    = BURST_LEN - 1'b1      ;   // 突发长度
 assign axi_awsize   = DQ_WIDTH*8/8          ;   // DATA_LEN = 256
 assign axi_awburst  = 2'b01                 ;
 assign axi_rready   = 1'b1                  ;
 
 assign buf_wr_en    = ((axi_rvalid == 1'b1) && (axi_rready == 1'b1)) ? 1'b1 : 1'b0;
-assign buf_wr_data  = axi_rdata             ;
+assign buf_wr_data  = axi_rdata;
 assign nege_axi_wr_wait = ((~axi_wr_buf_wait) && (axi_wr_buf_wait_d1)) ? 1'b1 : 1'b0;
+assign pose_vsync = ((hdmi_vsync) && (~reg_vsync_d1)) ? 1'b1 : 1'b0;
+assign nege_vsync = ((~hdmi_vsync) && (reg_vsync_d1)) ? 1'b1 : 1'b0;
+assign nege_href = ((~hdmi_href) && (reg_href_d1)) ? 1'b1 : 1'b0;
 
+
+// 延迟时钟周期
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
         axi_wr_buf_wait_d1 <= 'b0;
     end
     else begin
         axi_wr_buf_wait_d1 <= axi_wr_buf_wait;
+    end
+end
+
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        reg_vsync_d1 <= 'b0;
+        reg_href_d1 <= 'b0;
+    end
+    else begin
+        reg_vsync_d1 <= hdmi_vsync;
+        reg_href_d1 <= hdmi_href;
+    end
+end
+
+
+// axi 读使能信号
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        axi_rd_en <= 'b0;
+    end
+    else if((pose_vsync == 1'b1) || (nege_href == 1'b1)) begin
+        axi_rd_en <= 1'b1;
+    end
+    else if((row_end_flag_1 == 1'b1) || (row_end_flag_2 == 1'b1)) begin
+        axi_rd_en <= 1'b0;
+    end
+    else begin
+        axi_rd_en <= axi_rd_en;
+    end
+end
+
+
+// 一行读完标志信号
+always @(*) begin
+    if((buf_wr_state == WR_4) && (pix_count_qd == WIDTH_QD - DQ_WIDTH*8/16) 
+            && (axi_rlast == 1'b1)) begin
+        row_end_flag_1 <= 1'b1;
+    end
+    else if((buf_wr_state == WR_5) && (pix_count_tc == WIDTH_TC - DQ_WIDTH*8/16) 
+            && (axi_rlast == 1'b1)) begin
+        row_end_flag_2 <= 1'b1;
+    end
+    else if(axi_rd_en) begin
+        row_end_flag_1 <= 1'b0;
+        row_end_flag_2 <= 1'b0;
     end
 end
 
@@ -191,7 +253,7 @@ always @(posedge clk or negedge rst) begin
     else if(axi_rd_en) begin
         if(sel2_en) begin                    // 如果到了下边的图像
             case(buf_wr_state)
-                WR1_WAIT: begin
+                INIT_WAIT: begin
                     buf_wr_state <= WR5_WAIT;
                 end
                 WR5_WAIT: begin
@@ -204,10 +266,10 @@ always @(posedge clk or negedge rst) begin
                 end
                 WR_5: begin
                     if(pix_count_tc == WIDTH_TC - DQ_WIDTH*8/16) begin
-                        buf_wr_state <= WR1_WAIT;
+                        buf_wr_state <= INIT_WAIT;
                     end
                     else if(nege_axi_wr_wait) begin
-                        buf_wr_state <= WR1_WAIT;
+                        buf_wr_state <= INIT_WAIT;
                     end
                     else if(axi_rlast) begin
                         buf_wr_state <= WR5_WAIT;
@@ -221,6 +283,9 @@ always @(posedge clk or negedge rst) begin
         end
         else begin                                      // 默认，上边的图像
             case(buf_wr_state)
+                INIT_WAIT: begin
+                    buf_wr_state <= WR1_WAIT;
+                end
                 WR1_WAIT: begin
                     if((axi_arready == 1'b1) && (axi_arvalid == 1'b1)) begin
                         buf_wr_state <= WR_1;
@@ -288,7 +353,7 @@ always @(posedge clk or negedge rst) begin
                 end
                 WR_4: begin
                     if(pix_count_qd == WIDTH_QD - DQ_WIDTH*8/16) begin
-                        buf_wr_state <= WR1_WAIT;
+                        buf_wr_state <= INIT_WAIT;
                     end
                     else if(axi_wr_buf_wait) begin
                         buf_wr_state <= buf_wr_state;
@@ -297,7 +362,7 @@ always @(posedge clk or negedge rst) begin
                         buf_wr_state <= WR4_WAIT;
                     end
                 end
-                default: buf_wr_state <= WR1_WAIT;
+                default: buf_wr_state <= INIT_WAIT;
             endcase
         end
     end
@@ -426,7 +491,7 @@ always @(posedge clk or negedge rst) begin
         case(buf_wr_state)
             WR1_WAIT: begin
                 if((axi_arready == 1'b1) && (axi_arvalid == 1'b1)) begin
-                    if(reg_axi_araddr_1 < (WIDTH_QD * HEIGHT_QD) / 256) begin   // 通过地址判断当前像素数量
+                    if(reg_axi_araddr_1 < (WIDTH_QD*HEIGHT_QD*16)/256 - BURST_LEN) begin   // 通过地址判断当前像素数量
                         reg_axi_araddr_1 <= reg_axi_araddr_1 + BURST_LEN;
                     end
                     else begin
@@ -454,7 +519,7 @@ always @(posedge clk or negedge rst) begin
             end
             WR2_WAIT: begin
                 if((axi_arready == 1'b1) && (axi_arvalid == 1'b1)) begin
-                    if(reg_axi_araddr_2 < (WIDTH_QD * HEIGHT_QD) / 256) begin   // 通过地址判断当前像素数量
+                    if(reg_axi_araddr_2 < (WIDTH_QD*HEIGHT_QD*16)/256 - BURST_LEN) begin   // 通过地址判断当前像素数量
                         reg_axi_araddr_2 <= reg_axi_araddr_2 + BURST_LEN;
                     end
                     else begin
@@ -482,7 +547,7 @@ always @(posedge clk or negedge rst) begin
             end
             WR3_WAIT: begin
                 if((axi_arready == 1'b1) && (axi_arvalid == 1'b1)) begin
-                    if(reg_axi_araddr_3 < (WIDTH_QD * HEIGHT_QD) / 256) begin   // 通过地址判断当前像素数量
+                    if(reg_axi_araddr_3 < (WIDTH_QD*HEIGHT_QD*16)/256 - BURST_LEN) begin   // 通过地址判断当前像素数量
                         reg_axi_araddr_3 <= reg_axi_araddr_3 + BURST_LEN;
                     end
                     else begin
@@ -510,7 +575,7 @@ always @(posedge clk or negedge rst) begin
             end
             WR4_WAIT: begin
                 if((axi_arready == 1'b1) && (axi_arvalid == 1'b1)) begin
-                    if(reg_axi_araddr_4 < (WIDTH_QD * HEIGHT_QD) / 256) begin   // 通过地址判断当前像素数量
+                    if(reg_axi_araddr_4 < (WIDTH_QD*HEIGHT_QD*16)/256 - BURST_LEN) begin   // 通过地址判断当前像素数量
                         reg_axi_araddr_4 <= reg_axi_araddr_4 + BURST_LEN;
                     end
                     else begin
@@ -538,7 +603,7 @@ always @(posedge clk or negedge rst) begin
             end
             WR5_WAIT: begin
                 if((axi_arready == 1'b1) && (axi_arvalid == 1'b1)) begin
-                    if(reg_axi_araddr_5 < (WIDTH_TC * HEIGHT_TC) / 256) begin   // 通过地址判断当前像素数量
+                    if(reg_axi_araddr_5 < (WIDTH_TC*HEIGHT_TC*16)/256 - BURST_LEN) begin   // 通过地址判断当前像素数量
                         reg_axi_araddr_5 <= reg_axi_araddr_5 + BURST_LEN;
                     end
                     else begin

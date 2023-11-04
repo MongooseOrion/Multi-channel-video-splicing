@@ -148,9 +148,10 @@ wire                        de_in_buf           ;
 wire [15:0]                 rgb565_1            ;
 wire [15:0]                 rgb565_2            ;
 wire                        de_re               ;
-wire                        de_o                ;
+wire                        de_o                /* synthesis syn_keep = 1 */;
 wire                        hs_o                ;
 wire                        vs_o                ;
+wire                        init_done           ;
 wire                        video_vsync         ;
 wire                        video_hsync         ;
 wire                        video_href          ;
@@ -390,9 +391,9 @@ image_global multi_image_load(
     .hdmi_pix_data          (rgb565_hdmi),
 
     .vesa_out_clk           (pix_clk_out),
-    .rd_fsync               (),
-    .rd_en                  (de_re),
-    .de_o                   (video_href),
+    .vesa_out_vsync         (video_vsync),
+    .vesa_out_de            (de_re),
+    .de_out                 (video_href),
     .vesa_out_data          (video_data_in),
 
     .axi_awaddr             (axi_awaddr     ),
@@ -506,7 +507,7 @@ end
 // 产生 HDMI_VESA 协议时序 
 sync_vg sync_vg(                            
     .clk            (pix_clk_out    ),      //input                   clk,                                 
-    .rstn           (1'b1     ),        //input                   rstn,                            
+    .rstn           (init_done    ),        //input                   rstn,                            
     .vs_out         (video_vsync    ),             //output reg              vs_out,                                                                                                                                      
     .hs_out         (video_hsync    ),             //output reg              hs_out,            
     .de_out         (),                     //output reg              de_out, 

@@ -58,10 +58,10 @@ module image_global#(
 
     // 取数据 RAM
     input                           vesa_out_clk    ,
-    input                           rd_fsync        ,
-    input                           rd_en           ,
+    input                           vesa_out_vsync  ,
+    input                           vesa_out_de     ,
     output [15:0]                   vesa_out_data   ,
-    output                          de_o            ,
+    output                          de_out          ,
     
     // AXI 总线
     output [CTRL_ADDR_WIDTH-1:0]  axi_awaddr        ,
@@ -319,8 +319,6 @@ axi_interconnect_wr u_axi_interconnect_wr(
     .channel5_data                  (channel5_data   ),
     .frame_end_flag_5               (frame_end_flag_5),
 
-    .axi_rd_en                      (axi_rd_en  ),
-
     .axi_awaddr                     (axi_awaddr  ),
     .axi_awid                       (axi_awid    ),
     .axi_awlen                      (axi_awlen   ),
@@ -344,10 +342,11 @@ axi_interconnect_rd u_axi_interconnect_rd(
     .clk                        (ddr_clk),
     .rst                        (rst),
     .axi_wr_buf_wait            (axi_wr_buf_wait ),
-    .axi_rd_en                  (axi_rd_en       ),
     .channel_sel                (channel_sel     ),
     .buf_wr_en                  (buf_wr_en       ),
     .buf_wr_data                (buf_wr_data     ),
+    .hdmi_vsync                 (vesa_out_vsync  ),
+    .hdmi_href                  (vesa_out_de     ),
 
     .axi_arvalid                (axi_arvalid ),
     .axi_arready                (axi_arready ),
@@ -374,8 +373,8 @@ ddr_rd_buf u_ddr_rd_buf(
     .axi_wr_buf_wait            (axi_wr_buf_wait),
     .rd_clk                     (vesa_out_clk),
     .rd_rst                     (!rst),
-    .rd_en                      (rd_en),
-    .de_o                       (de_o),
+    .rd_en                      (vesa_out_de),
+    .de_o                       (de_out),
     .rgb565_out                 (vesa_out_data)
 );
 

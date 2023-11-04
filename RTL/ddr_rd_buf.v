@@ -43,18 +43,24 @@ module ddr_rd_buf #(
     input                           rd_rst          ,
     input                           rd_en           ,
     output reg                      de_o            ,
-    output      [15:0]              rgb565_out
+    output reg  [15:0]              rgb565_out
 );
 
 parameter WIDTH_QD = H_WIDTH / 4;
 parameter HEIGHT_QD = H_HEIGHT / 4;
+parameter WIDTH_TC = (H_WIDTH / 4) * 3;
+parameter HEIGHT_TC = (H_HEIGHT / 4) * 3;
 
-reg [10:0]              pix_count   ;
-reg [9:0]               row_count   ;
-reg [5:0]               wr_addr     ;
-reg                     wr_en       ;
-reg [DQ_WIDTH*8-1:0]    wr_data     ;
-reg [7:0]               rd_addr     ; 
+wire [15:0]             rd_data         ;
+
+reg [10:0]              pix_count       ;
+reg [9:0]               row_count       ;
+reg [5:0]               wr_addr         ;
+reg                     wr_en           ;
+reg [DQ_WIDTH*8-1:0]    wr_data         ;
+reg [7:0]               rd_addr         ; 
+reg                     rd_en_final     ;
+reg [10:0]              pix_rd_count    ;
 
 
 // 输入的像素数计数（只计一行）
@@ -151,10 +157,38 @@ axi_rd_buf rd_buf(
     .wr_clk     (clk),          // input
     .wr_rst     (!rst),         // input
     .rd_addr    (rd_addr),      // input [8:0]
-    .rd_data    (rgb565_out),      // output [16:0]
+    .rd_data    (rd_data),      // output [16:0]
     .rd_clk     (rd_clk),       // input
     .rd_rst     (!rd_rst)        // input
 );
+
+
+// 像素读出计数
+always @(posedge rd_clk or negedge rst) begin
+    if(!rst) begin
+        pix_rd_count <= 'b0;
+    end
+    else if(rd_en) begin
+        pix_rd_count <= pix_rd_count + 1'b1;
+    end
+    else if(pix_rd_count == H_WIDTH - 1'b1) begin
+        pix_rd_count <= 11'b0;
+    end
+    else begin
+        pix_rd_count <= pix_rd_count;
+    end
+end
+
+
+// 生成最终使能信号
+always @(*) begin
+    if(pix_rd_count <= (WIDTH_TC - 1'b1)) begin
+        rd_en_final <= rd_en;
+    end
+    else begin
+        rd_en_final <= 1'b0;
+    end
+end
 
 
 // 利用使能信号控制读地址生成，造成一个时钟周期延迟
@@ -162,11 +196,25 @@ always @(posedge rd_clk or negedge rd_rst) begin
     if(!rd_rst) begin
         rd_addr <= 'b0;
     end
-    else if(rd_en) begin
+    else if(rd_en_final) begin
         rd_addr <= rd_addr + 1'b1;
     end
     else begin
         rd_addr <= rd_addr;
+    end
+end
+
+
+// 输出数据，有一个周期延迟
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        rgb565_out <= 'b0;
+    end
+    else if(pix_rd_count < (WIDTH_TC - 1'b1)) begin
+        rgb565_out <= rd_data;
+    end
+    else begin
+        rgb565_out <= 16'b0;
     end
 end
 

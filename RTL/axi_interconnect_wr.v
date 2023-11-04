@@ -808,23 +808,6 @@ always @(*) begin
         default: reg_axi_wdata <= 'b0;
     endcase
 end
-
-
-// Ö¸Ê¾ axi ¿É¶Á
-always @(posedge clk or negedge rst) begin
-    if(!rst) begin
-        axi_rd_en <= 'b0;
-    end
-    else if(frame_addr_count_4 == 2'd2) begin
-        axi_rd_en <= 1'b1;
-    end
-    else if(frame_addr_count_4 == 2'd1) begin
-        axi_rd_en <= 1'b0;
-    end
-    else begin
-        axi_rd_en <= axi_rd_en;
-    end
-end
                                                                                                                                                                             
 
 endmodule
