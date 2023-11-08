@@ -47,8 +47,8 @@ module video_sampling#(
     input                                   rd_valid,
     output reg                              data_out_ready,
     output reg  [3:0]                       trans_id,
-    output reg                              row_end_flag,   // 可能不止一个时钟周期，可只取第一个周期
-    output reg                              frame_end_flag  // 同上
+    output reg                              row_end_flag,   // 
+    output reg                              frame_end_flag  // 
 );
 
 parameter COLUMN_NUM_QD = VIDEO_WIDTH / 'd4;
@@ -373,7 +373,7 @@ sdram_sampling wr_buffer(
 
 
 // 传输事务 ID
-always @(posedge clk or negedge rst) begin
+always @(posedge rd_clk or negedge rst) begin
     if(!rst) begin
         trans_id <= 4'b0;
     end
@@ -384,7 +384,7 @@ end
 
 
 // 写准备信号，在有效信号输入后通过判定写地址数值来确定拉高
-always @(posedge clk or negedge rst) begin
+always @(posedge rd_clk or negedge rst) begin
     if(!rst) begin
         rd_valid_d1 <= 'b0;
     end
@@ -394,7 +394,7 @@ always @(posedge clk or negedge rst) begin
 end
 assign pose_rd_valid = ((rd_valid) && (~rd_valid_d1)) ? 1'b1 : 1'b0;
 
-always @(posedge clk or negedge rst) begin
+always @(posedge rd_clk or negedge rst) begin
     if(!rst) begin
         rd_valid_count <= 'b0;
     end
@@ -412,7 +412,7 @@ always @(posedge clk or negedge rst) begin
 end
 
 // 判定存入数据量是否已经足够进行一次突发传输
-always @(posedge clk or negedge rst) begin
+always @(posedge rd_clk or negedge rst) begin
     if(!rst) begin
         data_out_ready <= 'b0;
     end
@@ -444,7 +444,7 @@ end
 
 
 // 像素计数，按 buffer 读通道为准
-always @(posedge clk or negedge rst) begin
+always @(posedge rd_clk or negedge rst) begin
     if(!rst) begin
         pix_full_count_en <= 'b0;
     end
@@ -459,7 +459,7 @@ always @(posedge clk or negedge rst) begin
     end
 end
 
-always @(posedge clk or negedge rst) begin
+always @(posedge rd_clk or negedge rst) begin
     if(!rst) begin
         pix_full_count <= 'b0;
     end
@@ -476,7 +476,7 @@ end
 
 
 // 行结束标志
-always @(posedge clk or negedge rst) begin
+always @(posedge rd_clk or negedge rst) begin
     if(!rst) begin
         row_end_flag <= 'b0;
     end
@@ -490,7 +490,7 @@ end
 
 
 // 帧结束标志
-always @(posedge clk or negedge rst) begin
+always @(posedge rd_clk or negedge rst) begin
     if(!rst) begin
         frame_end_flag <= 'b0;
     end

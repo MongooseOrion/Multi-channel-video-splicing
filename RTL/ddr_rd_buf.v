@@ -39,9 +39,10 @@ module ddr_rd_buf #(
     output reg                      axi_wr_buf_wait ,
 
     // hdmi 时序
+    input                           hdmi_vsync      ,
+    input                           hdmi_href       ,
     input                           rd_clk          ,
     input                           rd_rst          ,
-    input                           rd_en           ,
     output reg                      de_o            ,
     output reg  [15:0]              rgb565_out
 );
@@ -52,15 +53,39 @@ parameter WIDTH_TC = (H_WIDTH / 4) * 3;
 parameter HEIGHT_TC = (H_HEIGHT / 4) * 3;
 
 wire [15:0]             rd_data         ;
+wire                    pose_href       ;
+wire                    pose_vsync      ;
+wire                    rd_en           ;
 
+reg                     vsync_d1        ;
+reg                     href_d1         ;
 reg [10:0]              pix_count       ;
 reg [9:0]               row_count       ;
-reg [5:0]               wr_addr         ;
+reg [6:0]               wr_addr         ;
 reg                     wr_en           ;
 reg [DQ_WIDTH*8-1:0]    wr_data         ;
-reg [7:0]               rd_addr         ; 
+reg [10:0]              rd_addr         ; 
 reg                     rd_en_final     ;
+reg                     rd_en_final_d1  ;
 reg [10:0]              pix_rd_count    ;
+reg                     de_temp         ;
+
+assign pose_href = ((hdmi_href)&&(~href_d1)) ? 1'b1 : 1'b0;
+assign nege_href = ((~hdmi_href) && (href_d1)) ? 1'b1 : 1'b0;
+assign pose_vsync = ((hdmi_vsync) && (~vsync_d1)) ? 1'b1 : 1'b0;
+assign rd_en = hdmi_href;
+
+// 对行场同步信号延时
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        vsync_d1 <= 'b0;
+        href_d1 <= 'b0;
+    end
+    else begin
+        vsync_d1 <= hdmi_vsync;
+        href_d1 <= hdmi_href;
+    end
+end
 
 
 // 输入的像素数计数（只计一行）
@@ -76,6 +101,9 @@ always @(posedge clk or negedge rst) begin
             pix_count <= pix_count + (DQ_WIDTH*8/16);
         end
     end
+    else if(pose_href) begin            // 在行有效信号来之前这一行的数据应当已经传完
+        pix_count <= 'b0;
+    end
     else begin
         pix_count <= pix_count;
     end
@@ -87,9 +115,9 @@ always @(posedge clk or negedge rst) begin
     if(!rst) begin
         row_count <= 'b0;
     end
-    else if(pix_count == H_WIDTH - (DQ_WIDTH*8/16)) begin
-        if(row_count == H_HEIGHT - 1'b1) begin
-            row_count <= 'b0;
+    else if(pose_href) begin
+        if(row_count == H_HEIGHT) begin
+            row_count <= 'b1;
         end
         else begin
             row_count <= row_count + 1'b1;
@@ -104,25 +132,22 @@ end
 // 拉高 axi 等待信号和信号选通
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
-        axi_wr_buf_wait <= 'b0;
         channel_sel <= 'b1;
     end
-    else if((row_count == HEIGHT_QD - 1'd1) && (pix_count == H_WIDTH - 2*(DQ_WIDTH*8/16))) begin  // 在 179 行最后两个周期
-        axi_wr_buf_wait <= 1'b1;
+    else if((row_count == HEIGHT_QD - 1'b1) 
+            && (pix_count == H_WIDTH - 2*(DQ_WIDTH*8/16))) begin  // 在 180 行最后两个周期
         channel_sel <= 2'd2;
     end
-    else if((row_count == H_HEIGHT - 1'b1) && (pix_count == H_WIDTH - 2*(DQ_WIDTH*8/16))) begin
-        axi_wr_buf_wait <= 1'b0;
+    else if(pose_vsync) begin
         channel_sel <= 2'd1;
     end
     else begin
-        axi_wr_buf_wait <= axi_wr_buf_wait;
         channel_sel <= channel_sel;
     end
 end
 
 
-// 读地址生成
+// 写地址生成
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
         wr_addr <= 'b0;
@@ -130,22 +155,18 @@ always @(posedge clk or negedge rst) begin
     else if(buf_wr_en) begin
         wr_addr <= wr_addr + 1'b1;
     end
+    else if(pose_href) begin
+        wr_addr <= 'b0;
+    end
     else begin
         wr_addr <= wr_addr;
     end
 end
 
 
-// 读使能和读数据延迟一拍
-always @(posedge clk or negedge rst) begin
-    if(!rst) begin
-        wr_en <= 'b0;
-        wr_data <= 'b0;
-    end
-    else begin
-        wr_en <= buf_wr_en;
-        wr_data <= buf_wr_data;
-    end
+always @(*) begin
+    wr_en <= buf_wr_en;
+    wr_data <= buf_wr_data;
 end
 
 
@@ -164,15 +185,17 @@ axi_rd_buf rd_buf(
 
 
 // 像素读出计数
-always @(posedge rd_clk or negedge rst) begin
-    if(!rst) begin
+always @(posedge rd_clk or negedge rd_rst) begin
+    if(!rd_rst) begin
         pix_rd_count <= 'b0;
     end
     else if(rd_en) begin
-        pix_rd_count <= pix_rd_count + 1'b1;
-    end
-    else if(pix_rd_count == H_WIDTH - 1'b1) begin
-        pix_rd_count <= 11'b0;
+        if(pix_rd_count == H_WIDTH - 1'b1) begin
+            pix_rd_count <= 11'b0;
+        end
+        else begin
+            pix_rd_count <= pix_rd_count + 1'b1;
+        end
     end
     else begin
         pix_rd_count <= pix_rd_count;
@@ -182,11 +205,21 @@ end
 
 // 生成最终使能信号
 always @(*) begin
-    if(pix_rd_count <= (WIDTH_TC - 1'b1)) begin
+    if(((pix_rd_count <= (WIDTH_TC - 1'b1)) && (row_count > HEIGHT_QD))
+        || (row_count <= HEIGHT_QD)) begin
         rd_en_final <= rd_en;
     end
     else begin
         rd_en_final <= 1'b0;
+    end
+end
+
+always @(posedge rd_clk or negedge rd_rst) begin
+    if(!rd_rst) begin
+        rd_en_final_d1 <= 'b0;
+    end
+    else begin
+        rd_en_final_d1 <= rd_en_final;
     end
 end
 
@@ -199,6 +232,9 @@ always @(posedge rd_clk or negedge rd_rst) begin
     else if(rd_en_final) begin
         rd_addr <= rd_addr + 1'b1;
     end
+    else if(nege_href) begin
+        rd_addr <= 'b0;
+    end
     else begin
         rd_addr <= rd_addr;
     end
@@ -206,11 +242,11 @@ end
 
 
 // 输出数据，有一个周期延迟
-always @(posedge clk or negedge rst) begin
-    if(!rst) begin
+always @(posedge rd_clk or negedge rd_rst) begin
+    if(!rd_rst) begin
         rgb565_out <= 'b0;
     end
-    else if(pix_rd_count < (WIDTH_TC - 1'b1)) begin
+    else if(rd_en_final_d1) begin
         rgb565_out <= rd_data;
     end
     else begin
@@ -220,12 +256,14 @@ end
 
 
 // 输出实际 de_o 信号
-always @(posedge clk or negedge rst) begin
-    if(!rst) begin
+always @(posedge rd_clk or negedge rd_rst) begin
+    if(!rd_rst) begin
+        de_temp <= 'b0;
         de_o <= 'b0;
     end
     else begin
-        de_o <= rd_en;
+        de_temp <= rd_en;
+        de_o <= de_temp;
     end
 end
 

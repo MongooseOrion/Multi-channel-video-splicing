@@ -80,7 +80,6 @@ wire				o_en;
 wire [12:0]         x_cnt; 
 wire [12:0]         y_cnt;
 
-reg [3:0]                   reg_ctrl_command;
 reg [2:0]                   positive_value_command;
 reg [2:0]                   negative_value_command;
 reg [2:0] 	     			state;
@@ -106,22 +105,20 @@ assign y_cnt = write_read_len[31:10];
 // 输入指令处理
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
-        reg_ctrl_command <= 'b0;
         negative_value_command <= 'b0;
         positive_value_command <= 'b0;
     end
-    else if(value_command_in[3] == 1'b0) begin
-        reg_ctrl_command <= ctrl_command_in;
-        positive_value_command <= value_command_in[2:0];
-    end
-    else if(value_command_in[3] == 1'b1) begin
-        reg_ctrl_command <= ctrl_command_in;
-        negative_value_command <= value_command_in[2:0];
-    end
-    else begin
-        reg_ctrl_command <= reg_ctrl_command;
-        negative_value_command <= 3'b0;
-        positive_value_command <= 3'b0;
+    else if(ctrl_command_in) begin
+        if(value_command_in[3] == 1'b0) begin
+            positive_value_command <= value_command_in[2:0];
+        end
+        else if(value_command_in[3] == 1'b1) begin
+            negative_value_command <= value_command_in[2:0];
+        end
+        else begin
+            negative_value_command <= 3'b0;
+            positive_value_command <= 3'b0;
+        end
     end
 end
 
@@ -283,14 +280,17 @@ begin
             ROTATE_MODE: begin
                 rd_addr <= rd_burst_addr_start + x_rotate + VIDEO_WIDTH * y_rotate;
             end
-        2	:	
-            rd_addr 	<= 	rd_burst_addr_start	+	x_cnt	+	VIDEO_WIDTH*y_cnt    - x_shift_cnt ;	
-        3	:	
-            rd_addr 	<= 	rd_burst_addr_start	+	x_cnt	+	VIDEO_WIDTH*y_cnt    -   VIDEO_WIDTH*y_shift_cnt;
-        4	:	
-            rd_addr 	<= 	rd_burst_addr_start	+	scale_value*x_cnt	+	scale_value*VIDEO_WIDTH*y_cnt;                
+            SHIFT_MODE_X: begin	
+                rd_addr <= rd_burst_addr_start + x_cnt + VIDEO_WIDTH*y_cnt - x_shift_cnt ;
+            end	
+            SHIFT_MODE_Y: begin
+                rd_addr <= rd_burst_addr_start + x_cnt + VIDEO_WIDTH*y_cnt - VIDEO_WIDTH*y_shift_cnt;
+            end
+            SCALE_MODE:	begin
+                rd_addr <= rd_burst_addr_start + scale_value*x_cnt + scale_value*VIDEO_WIDTH*y_cnt;  
+            end              
             default: begin
-                rd_addr 	<= 	rd_burst_addr_start	+	write_read_len;	
+                rd_addr <= rd_burst_addr_start + write_read_len;	
             end
         endcase
     end

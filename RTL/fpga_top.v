@@ -142,13 +142,14 @@ wire                        hdmi_de_out         ;
 wire [15:0]                 rgb565_hdmi         ;
 wire [15:0]                 i_rgb565            ;
 wire [15:0]                 o_rgb565            ;
+wire [23:0]                 o_rgb888            ;
 wire                        pclk_in_buf         ;    
 wire                        vs_in_buf           ;
 wire                        de_in_buf           ;
 wire [15:0]                 rgb565_1            ;
 wire [15:0]                 rgb565_2            ;
 wire                        de_re               ;
-wire                        de_o                /* synthesis syn_keep = 1 */;
+wire                        de_o                ;
 wire                        hs_o                ;
 wire                        vs_o                ;
 wire                        init_done           ;
@@ -397,30 +398,32 @@ image_global multi_image_load(
     .vesa_out_data          (video_data_in),
 
     .axi_awaddr             (axi_awaddr     ),
-    .axi_awid               (axi_awid       ),
+    .axi_awid               (axi_awuser_id  ),
     .axi_awlen              (axi_awlen      ),
-    .axi_awsize             (axi_awsize     ),
-    .axi_awburst            (axi_awburst    ),
+    .axi_awsize             (     ),
+    .axi_awburst            (    ),
     .axi_awready            (axi_awready    ),
     .axi_awvalid            (axi_awvalid    ),
     .axi_wdata              (axi_wdata      ),
     .axi_wstrb              (axi_wstrb      ),
-    .axi_wlast              (axi_wlast      ),
-    .axi_wvalid             (axi_wvalid     ),
+    .axi_wlast              (axi_wusero_last),
+    .axi_wvalid             (     ),
     .axi_wready             (axi_wready     ),
     .axi_bid                (axi_bid        ),
     .axi_araddr             (axi_araddr     ),
-    .axi_arid               (axi_arid       ),
+    .axi_arid               (axi_aruser_id  ),
     .axi_arlen              (axi_arlen      ),
-    .axi_arsize             (axi_arsize     ),
-    .axi_arburst            (axi_arburst    ),
+    .axi_arsize             (     ),
+    .axi_arburst            (    ),
     .axi_arvalid            (axi_arvalid    ),
     .axi_arready            (axi_arready    ),
-    .axi_rready             (axi_rready     ),
+    .axi_rready             (     ),
     .axi_rdata              (axi_rdata      ),
     .axi_rvalid             (axi_rvalid     ),
     .axi_rlast              (axi_rlast      ),
-    .axi_rid                (axi_rid        )
+    .axi_rid                (axi_rid        ),
+
+    .init_done              (init_done)
 );
 
 
@@ -494,9 +497,9 @@ assign     i_rgb565 = rgb565_2;*/
 //
 // 用于 HDMI_out 的像素数据、行场同步信号数据
 always@(posedge pix_clk_out) begin
-    r_out<={o_rgb565[15:11],3'b0   };
-    g_out<={o_rgb565[10:5],2'b0    };
-    b_out<={o_rgb565[4:0],3'b0     }; 
+    r_out<={o_rgb888[23:16]};
+    g_out<={o_rgb888[15:8]};
+    b_out<={o_rgb888[7:0]}; 
     vs_out<=vs_o;
     hs_out<=hs_o;
     de_out<=de_o;
@@ -510,7 +513,7 @@ sync_vg sync_vg(
     .rstn           (init_done    ),        //input                   rstn,                            
     .vs_out         (video_vsync    ),             //output reg              vs_out,                                                                                                                                      
     .hs_out         (video_hsync    ),             //output reg              hs_out,            
-    .de_out         (),                     //output reg              de_out, 
+    .de_out         (href_1),                     //output reg              de_out, 
     .de_re          (de_re          )    
 );
 
@@ -529,7 +532,7 @@ ethernet_character u_ethernet_character(
     .hdmi_vsync             (vs_o),
     .hdmi_hsync             (hs_o),
     .hdmi_href              (de_o),
-    .hdmi_data              (o_rgb565),
+    .hdmi_data              (o_rgb888),
 
     .rgmii_txd              (rgmii_txd   ),
     .rgmii_txctl            (rgmii_txctl ),
@@ -543,7 +546,7 @@ ethernet_character u_ethernet_character(
 //
 // DDR
 ddr u_ddr (
-    .ref_clk                   (sys_clk            ),
+    .ref_clk                   (clk_50M            ),
     .resetn                    (rstn_out           ),// input
     .ddr_init_done             (ddr_init_done      ),// output
     .ddrphy_clkin              (core_clk           ),// output

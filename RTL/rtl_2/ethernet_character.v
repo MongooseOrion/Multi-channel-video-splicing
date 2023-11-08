@@ -38,7 +38,7 @@ module ethernet_character(
     output  					hdmi_vsync      ,
     output  					hdmi_hsync      ,
     output  					hdmi_href       ,
-    output  					hdmi_data       ,
+    output  	[23:0]			hdmi_data       ,
     // 以太网
     output		[3:0]           rgmii_txd       ,
     output                      rgmii_txctl     ,
@@ -48,19 +48,25 @@ module ethernet_character(
     input                       rgmii_rxc       
 );
 
+wire [23:0]                     i_data;
+
 wire                            osd_hs;
 wire                            osd_vs;
 wire                            osd_de;
-wire [15:0]						osd_data;
+wire [23:0]						osd_data;
 
 wire [7:0]                      udp_rec_ram_rdata;
 wire [10:0]                     udp_rec_ram_read_addr;
 wire                            udp_rec_data_valid;
 
-assign hdmi_hs = osd_hs;
-assign hdmi_vs = osd_vs;
-assign hdmi_de = osd_de;
+assign hdmi_hsync = osd_hs;
+assign hdmi_vsync = osd_vs;
+assign hdmi_href = osd_de;
 assign hdmi_data = osd_data;
+
+assign i_data = {video_data_in[15:11],3'b0,
+                video_data_in[10:5],2'b0,
+                video_data_in[4:0],3'b0};
 
 
 // 显示字符的模块
@@ -75,7 +81,7 @@ osd_display #(
     .i_hs                  (video_hsync                 ),
     .i_vs                  (video_vsync                 ),
     .i_de                  (video_href                  ),
-    .i_data                (video_data_in  				),
+    .i_data                (i_data  				),
     .o_hs                  (osd_hs                      ),
     .o_vs                  (osd_vs                      ),
     .o_de                  (osd_de                      ),

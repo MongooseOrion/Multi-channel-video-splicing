@@ -42,42 +42,37 @@ module axi_interconnect_wr #(
     input                               clk,                // ddr core clk
     input                               rst,
     // 通道 1
-    output                              channel1_clk    ,
     output reg  [M_ADDR_WIDTH-1'b1:0]   channel1_addr   ,
     output reg                          channel1_rvalid ,
     input                               channel1_rready ,
     input       [DQ_WIDTH*8-1'b1:0]     channel1_data   ,
     input                               frame_end_flag_1,
     // 通道 2
-    output                              channel2_clk    ,
     output reg  [M_ADDR_WIDTH-1'b1:0]   channel2_addr   ,
     output reg                          channel2_rvalid ,
     input                               channel2_rready ,
     input       [DQ_WIDTH*8-1'b1:0]     channel2_data   ,
     input                               frame_end_flag_2,
     // 通道 3
-    output                              channel3_clk    ,
     output reg  [M_ADDR_WIDTH-1'b1:0]   channel3_addr   ,
     output reg                          channel3_rvalid ,
     input                               channel3_rready ,
     input       [DQ_WIDTH*8-1'b1:0]     channel3_data   ,
     input                               frame_end_flag_3,
     // 通道 4
-    output                              channel4_clk    ,
     output reg  [M_ADDR_WIDTH-1'b1:0]   channel4_addr   ,
     output reg                          channel4_rvalid ,
     input                               channel4_rready ,
     input       [DQ_WIDTH*8-1'b1:0]     channel4_data   ,
     input                               frame_end_flag_4,
     // 通道 5
-    output                              channel5_clk    ,
     output reg  [M_ADDR_WIDTH-1'b1:0]   channel5_addr   ,
     output reg                          channel5_rvalid ,
     input                               channel5_rready ,
     input       [DQ_WIDTH*8-1'b1:0]     channel5_data   ,
     input                               frame_end_flag_5,
 
-    output reg                          axi_rd_en       ,
+    output reg                          init_done       /*synthesis PAP_MARK_DEBUG="1"*/,
 
     // AXI WRITE INTERFACE
     output [CTRL_ADDR_WIDTH-1:0]        axi_awaddr      ,
@@ -110,12 +105,14 @@ parameter   INIT_WAIT = 4'b0000,       // 定义读取状态
             CH5_WAIT = 4'b1000,
             CH_5 = 4'b1001;
 // 地址偏移量
-parameter FRAME_ADDR_OFFSET = 'd40960;
-parameter   ADDR_OFFSET_1 = 'd0,                    // 0-40959, 40960-81919
-            ADDR_OFFSET_2 = FRAME_ADDR_OFFSET * 2,  // 81920-122879, 122880-163839
-            ADDR_OFFSET_3 = ADDR_OFFSET_2 + 2 * (FRAME_ADDR_OFFSET),      // 
-            ADDR_OFFSET_4 = ADDR_OFFSET_3 + 2 * (FRAME_ADDR_OFFSET),
-            ADDR_OFFSET_5 = ADDR_OFFSET_4 + 2 * (FRAME_ADDR_OFFSET);
+parameter FRAME_ADDR_OFFSET_1 = 'd30_000;
+parameter FRAME_ADDR_OFFSET_2 = 'd260_000;
+parameter   ADDR_OFFSET_1 = 'd0,                    
+            ADDR_OFFSET_2 = FRAME_ADDR_OFFSET_1 * 2,  
+            ADDR_OFFSET_3 = ADDR_OFFSET_2 + 2 * (FRAME_ADDR_OFFSET_1),      // 
+            ADDR_OFFSET_4 = ADDR_OFFSET_3 + 2 * (FRAME_ADDR_OFFSET_1),
+            ADDR_OFFSET_5 = ADDR_OFFSET_4 + 2 * (FRAME_ADDR_OFFSET_1);
+parameter ADDR_STEP = BURST_LEN * 8;       // 首地址自增步长，1 个地址 32 位数据，这与芯片的 DQ 宽度有关
 
 wire                            pose_axi_wready ;
 
@@ -147,16 +144,10 @@ reg [CTRL_ADDR_WIDTH-1:0]       reg_axi_awaddr_3    ;
 reg [CTRL_ADDR_WIDTH-1:0]       reg_axi_awaddr_4    ;
 reg [CTRL_ADDR_WIDTH-1:0]       reg_axi_awaddr_5    ;
 
-assign channel1_clk = clk   ;
-assign channel2_clk = clk   ;
-assign channel3_clk = clk   ;
-assign channel4_clk = clk   ;
-assign channel5_clk = clk   ;
-
 assign axi_awaddr   = reg_axi_awaddr        ;
 assign axi_awvalid  = reg_axi_awvalid       ;
 assign axi_awlen    = BURST_LEN - 1'b1      ;   // 突发长度：16
-assign axi_awsize   = DQ_WIDTH*8/8          ;   // DATA_LEN = 256
+assign axi_awsize   = DQ_WIDTH              ;   // DATA_LEN = 256
 assign axi_awburst  = 2'b01                 ;
 assign axi_wdata    = reg_axi_wdata         ;
 assign axi_wvalid   = reg_axi_wvalid        ;
@@ -492,7 +483,7 @@ always @(posedge clk or negedge rst) begin
                         reg_axi_awaddr <= ADDR_OFFSET_1 + reg_axi_awaddr_1;         // 没握手之前生成首地址
                     end
                     else if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
-                        reg_axi_awaddr_1 <= reg_axi_awaddr_1 + BURST_LEN;
+                        reg_axi_awaddr_1 <= reg_axi_awaddr_1 + ADDR_STEP;
                     end
                     else begin
                         reg_axi_awaddr_1 <= reg_axi_awaddr_1;
@@ -501,10 +492,10 @@ always @(posedge clk or negedge rst) begin
                 end
                 else if(frame_addr_count_1 == 2'd1) begin
                     if((channel1_rvalid == 1'b1) && (channel1_rready == 1'b1)) begin
-                        reg_axi_awaddr <= ADDR_OFFSET_1 + FRAME_ADDR_OFFSET + reg_axi_awaddr_1;
+                        reg_axi_awaddr <= ADDR_OFFSET_1 + FRAME_ADDR_OFFSET_1 + reg_axi_awaddr_1;
                     end
                     else if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
-                        reg_axi_awaddr_1 <= reg_axi_awaddr_1 + BURST_LEN;
+                        reg_axi_awaddr_1 <= reg_axi_awaddr_1 + ADDR_STEP;
                     end
                     else begin
                         reg_axi_awaddr_1 <= reg_axi_awaddr_1;
@@ -547,7 +538,7 @@ always @(posedge clk or negedge rst) begin
                         reg_axi_awaddr <= ADDR_OFFSET_2 + reg_axi_awaddr_2;         // 没握手之前生成首地址
                     end
                     else if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
-                        reg_axi_awaddr_2 <= reg_axi_awaddr_2 + BURST_LEN;
+                        reg_axi_awaddr_2 <= reg_axi_awaddr_2 + ADDR_STEP;
                     end
                     else begin
                         reg_axi_awaddr_2 <= reg_axi_awaddr_2;
@@ -556,12 +547,10 @@ always @(posedge clk or negedge rst) begin
                 end
                 else if(frame_addr_count_2 == 2'd1) begin
                     if((channel2_rvalid == 1'b1) && (channel2_rready == 1'b1)) begin
-                        reg_axi_awaddr_2 <= reg_axi_awaddr_2 + BURST_LEN;
-                        reg_axi_awaddr <= ADDR_OFFSET_2 + FRAME_ADDR_OFFSET + reg_axi_awaddr_2;
+                        reg_axi_awaddr <= ADDR_OFFSET_2 + FRAME_ADDR_OFFSET_1 + reg_axi_awaddr_2;
                     end
                     else if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
-                        reg_axi_awaddr <= ADDR_OFFSET_2 + FRAME_ADDR_OFFSET + reg_axi_awaddr_2;
-                        reg_axi_awaddr_2 <= reg_axi_awaddr_2 + BURST_LEN;
+                        reg_axi_awaddr_2 <= reg_axi_awaddr_2 + ADDR_STEP;
                     end
                     else begin
                         reg_axi_awaddr_2 <= reg_axi_awaddr_2;
@@ -604,7 +593,7 @@ always @(posedge clk or negedge rst) begin
                         reg_axi_awaddr <= ADDR_OFFSET_3 + reg_axi_awaddr_3;         // 没握手之前生成首地址
                     end
                     else if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
-                        reg_axi_awaddr_3 <= reg_axi_awaddr_3 + BURST_LEN;
+                        reg_axi_awaddr_3 <= reg_axi_awaddr_3 + ADDR_STEP;
                     end
                     else begin
                         reg_axi_awaddr_3 <= reg_axi_awaddr_3;
@@ -613,12 +602,10 @@ always @(posedge clk or negedge rst) begin
                 end
                 else if(frame_addr_count_3 == 2'd1) begin
                     if((channel3_rvalid == 1'b1) && (channel3_rready == 1'b1)) begin
-                        reg_axi_awaddr_3 <= reg_axi_awaddr_3 + BURST_LEN;
-                        reg_axi_awaddr <= ADDR_OFFSET_3 + FRAME_ADDR_OFFSET + reg_axi_awaddr_3;
+                        reg_axi_awaddr <= ADDR_OFFSET_3 + FRAME_ADDR_OFFSET_1 + reg_axi_awaddr_3;
                     end
                     else if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
-                        reg_axi_awaddr <= ADDR_OFFSET_3 + FRAME_ADDR_OFFSET + reg_axi_awaddr_3;
-                        reg_axi_awaddr_3 <= reg_axi_awaddr_3 + BURST_LEN;
+                        reg_axi_awaddr_3 <= reg_axi_awaddr_3 + ADDR_STEP;
                     end
                     else begin
                         reg_axi_awaddr_3 <= reg_axi_awaddr_3;
@@ -661,7 +648,7 @@ always @(posedge clk or negedge rst) begin
                         reg_axi_awaddr <= ADDR_OFFSET_4 + reg_axi_awaddr_4;         // 没握手之前生成首地址
                     end
                     else if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
-                        reg_axi_awaddr_4 <= reg_axi_awaddr_4 + BURST_LEN;
+                        reg_axi_awaddr_4 <= reg_axi_awaddr_4 + ADDR_STEP;
                     end
                     else begin
                         reg_axi_awaddr_4 <= reg_axi_awaddr_4;
@@ -670,12 +657,10 @@ always @(posedge clk or negedge rst) begin
                 end
                 else if(frame_addr_count_4 == 2'd1) begin
                     if((channel4_rvalid == 1'b1) && (channel4_rready == 1'b1)) begin
-                        reg_axi_awaddr_4 <= reg_axi_awaddr_4 + BURST_LEN;
-                        reg_axi_awaddr <= ADDR_OFFSET_4 + FRAME_ADDR_OFFSET + reg_axi_awaddr_4;
+                        reg_axi_awaddr <= ADDR_OFFSET_4 + FRAME_ADDR_OFFSET_1 + reg_axi_awaddr_4;
                     end
                     else if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
-                        reg_axi_awaddr <= ADDR_OFFSET_4 + FRAME_ADDR_OFFSET + reg_axi_awaddr_4;
-                        reg_axi_awaddr_4 <= reg_axi_awaddr_4 + BURST_LEN;
+                        reg_axi_awaddr_4 <= reg_axi_awaddr_4 + ADDR_STEP;
                     end
                     else begin
                         reg_axi_awaddr_4 <= reg_axi_awaddr_4;
@@ -718,7 +703,7 @@ always @(posedge clk or negedge rst) begin
                         reg_axi_awaddr <= ADDR_OFFSET_5 + reg_axi_awaddr_5;         // 没握手之前生成首地址
                     end
                     else if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
-                        reg_axi_awaddr_5 <= reg_axi_awaddr_5 + BURST_LEN;
+                        reg_axi_awaddr_5 <= reg_axi_awaddr_5 + ADDR_STEP;
                     end
                     else begin
                         reg_axi_awaddr_5 <= reg_axi_awaddr_5;
@@ -727,12 +712,10 @@ always @(posedge clk or negedge rst) begin
                 end
                 else if(frame_addr_count_5 == 2'd1) begin
                     if((channel5_rvalid == 1'b1) && (channel5_rready == 1'b1)) begin
-                        reg_axi_awaddr_5 <= reg_axi_awaddr_5 + BURST_LEN;
-                        reg_axi_awaddr <= ADDR_OFFSET_5 + FRAME_ADDR_OFFSET + reg_axi_awaddr_5;
+                        reg_axi_awaddr <= ADDR_OFFSET_5 + FRAME_ADDR_OFFSET_2 + reg_axi_awaddr_5;
                     end
                     else if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
-                        reg_axi_awaddr <= ADDR_OFFSET_5 + FRAME_ADDR_OFFSET + reg_axi_awaddr_5;
-                        reg_axi_awaddr_5 <= reg_axi_awaddr_5 + BURST_LEN;
+                        reg_axi_awaddr_5 <= reg_axi_awaddr_5 + ADDR_STEP;
                     end
                     else begin
                         reg_axi_awaddr_5 <= reg_axi_awaddr_5;
@@ -807,6 +790,20 @@ always @(*) begin
         CH_5: reg_axi_wdata <= pose_axi_wready ? channel5_data_d1 : channel5_data;
         default: reg_axi_wdata <= 'b0;
     endcase
+end
+
+
+// 初始化完成信号，用于指示 hdmi 时序生成模块完成复位
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        init_done <= 'b0;
+    end
+    else if(frame_end_flag_4)begin
+        init_done <= 1'b1;
+    end
+    else begin
+        init_done <= init_done;
+    end
 end
                                                                                                                                                                             
 
