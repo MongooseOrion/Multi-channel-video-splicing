@@ -26,18 +26,14 @@
 // 将 buf 数据通过 axi 写入 ddr（基于乱序和 outstanding）
 //
 module axi_interconnect_wr #(
-    parameter MEM_ROW_WIDTH        = 15    ,
-    parameter MEM_COLUMN_WIDTH     = 10    ,
-    parameter MEM_BANK_WIDTH       = 3     ,
+    parameter MEM_ROW_WIDTH        = 15     ,
+    parameter MEM_COLUMN_WIDTH     = 10     ,
+    parameter MEM_BANK_WIDTH       = 3      ,
     parameter CTRL_ADDR_WIDTH = MEM_ROW_WIDTH + MEM_BANK_WIDTH + MEM_COLUMN_WIDTH,
-    parameter M_ADDR_WIDTH      = 5'd5,             // buf 读通道位宽
-    parameter S_ADDR_WIDTH      = 6'd40,
-    parameter AXI_ADDR_WIDTH    = 6'd27,
-    parameter DQ_WIDTH          = 12'd32,
-    parameter BURST_LEN         = 12'd16,
-    parameter PIX_WIDTH         = 12'd16,
-    parameter LINE_ADDR_WIDTH   = 16'd19,
-    parameter FRAME_CNT_WIDTH   = 16'd8
+    parameter DQ_WIDTH          = 12'd32    ,
+    parameter BURST_LEN         = 12'd16    ,
+    parameter H_HEIGHT = 'd720              ,
+    parameter H_WIDTH = 'd1280              
 )(
     input                               clk,                // ddr core clk
     input                               rst,
@@ -70,6 +66,8 @@ module axi_interconnect_wr #(
     input                               processing_wait ,           // 需要进行图像处理，请等待
     output reg                          wait_proceed    ,           // 操作成功指令
     // 写完成，用于其他模块初始化
+    output reg                          init_qd_done    ,
+    output reg                          init_tc_done    ,
     output reg                          init_done       /*synthesis PAP_MARK_DEBUG="1"*/,
 
     // AXI WRITE INTERFACE
@@ -119,6 +117,10 @@ parameter   INIT_WAIT = 4'd0,
             CH5_WAIT = 4'd13,
             CH5_ADDR = 4'd14,
             CH5_DATA = 4'd15;
+parameter WIDTH_QD = H_WIDTH / 4;
+parameter HEIGHT_QD = H_HEIGHT / 4;
+parameter WIDTH_TC = H_WIDTH * 3/4;
+parameter HEIGHT_TC = H_HEIGHT * 3/4;
 
 wire                            vs_1;
 wire                            vs_2;
@@ -151,11 +153,11 @@ reg [1:0]                       frame_count_3       ;
 reg [1:0]                       frame_count_4       ;
 reg [1:0]                       frame_count_5       ;
 reg                             awvalid_temp        ;
-reg [10:0]                      reg_axi_awaddr_1    ;
-reg [10:0]                      reg_axi_awaddr_2    ;
-reg [10:0]                      reg_axi_awaddr_3    ;
-reg [10:0]                      reg_axi_awaddr_4    ;
-reg [10:0]                      reg_axi_awaddr_5    ;
+reg [15:0]                      reg_axi_awaddr_1    ;
+reg [15:0]                      reg_axi_awaddr_2    ;
+reg [15:0]                      reg_axi_awaddr_3    ;
+reg [15:0]                      reg_axi_awaddr_4    ;
+reg [19:0]                      reg_axi_awaddr_5    ;
 reg                             read_flag_1         ;
 reg                             read_flag_2         ;
 reg                             read_flag_3         ;
@@ -785,6 +787,33 @@ always @(*) begin
             reg_axi_wdata <= 'd0;
         end
     endcase
+end
+
+
+// 已经写入足够的数据，可用于其他模块初始化
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        init_qd_done <= 'b0;            // 上部分
+        init_tc_done <= 'b0;            // 下部分
+        init_done <= 'b0;               // 全局
+    end
+    else if((reg_axi_awaddr_1 == WIDTH_QD * HEIGHT_QD * 16 / 64)
+            && (reg_axi_awaddr_2 == WIDTH_QD * HEIGHT_QD * 16 / 64)
+            && (reg_axi_awaddr_3 == WIDTH_QD * HEIGHT_QD * 16 / 64)
+            && (reg_axi_awaddr_4 == WIDTH_QD * HEIGHT_QD * 16 / 64)) begin
+        init_qd_done <= 1'b1;
+    end
+    else if(reg_axi_awaddr_5 == WIDTH_TC * HEIGHT_TC * 16 / 64) begin
+        init_tc_done <= 1'b1;
+    end
+    else if((init_qd_done == 1'b1) || (init_tc_done == 1'b1)) begin
+        init_done <= 1'b1;
+    end
+    else begin
+        init_qd_done <= init_qd_done;
+        init_tc_done <= init_tc_done;
+        init_done <= init_done;
+    end
 end
 
 endmodule

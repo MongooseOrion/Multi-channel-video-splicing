@@ -37,15 +37,15 @@ module video_sampling#(
     input               clk,
     input               rst,
     // ĞÅºÅÊäÈë
-    input               de_in,
-    input               vs_in,
-    input       [15:0]  rgb565_in,
+    input               de_in       ,
+    input               vs_in       ,
+    input       [15:0]  rgb565_in   ,
     // ·¢Íù DDR ´æ´¢
-    input                                   rd_clk,
-    output      [DQ_WIDTH*8-1'b1:0]         rd_data,
-    input                                   rd_en,
-    output                                  burst_emergency,
-    output reg                              data_out_ready,
+    input                                   rd_clk          ,
+    output      [DQ_WIDTH*8-1'b1:0]         rd_data         ,
+    input                                   rd_en           ,
+    output                                  burst_emergency ,
+    output reg                              data_out_ready  ,
     output reg  [3:0]                       trans_id
 );
 

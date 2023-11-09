@@ -43,8 +43,9 @@ module axi_interconnect_rd #(
     input                               hdmi_href       ,
 
     // 输出数据给 buffer
-    input                               init_done       ,
-    input                               axi_wr_buf_wait ,   // 必须提前拉高并持续一段时间
+    input                               init_tc_done    ,
+    input                               init_qd_done    ,
+    input                               processing_wait ,
     input  [1:0]                        channel_sel     ,
     output                              buf_wr_en       /*synthesis PAP_MARK_DEBUG="1"*/,
     output [DQ_WIDTH*8-1:0]             buf_wr_data     /*synthesis PAP_MARK_DEBUG="1"*/,    
