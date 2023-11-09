@@ -104,26 +104,31 @@ parameter   CAM_1 = 4'b0001,
 
 wire [M_ADDR_WIDTH-1'b1:0]      channel1_addr       ;
 wire                            channel1_rvalid     /* synthesis syn_keep = 1 */;
+wire                            channel1_rd_en      ;
 wire                            channel1_rready     /* synthesis syn_keep = 1 */;
 wire [MEM_DQ_WIDTH*8-1'b1:0]    channel1_data       ;
 wire                            frame_end_flag_1    ;
 wire [M_ADDR_WIDTH-1'b1:0]      channel2_addr       ;
 wire                            channel2_rvalid     /* synthesis syn_keep = 1 */;
+wire                            channel2_rd_en      ;
 wire                            channel2_rready     /* synthesis syn_keep = 1 */;
 wire [MEM_DQ_WIDTH*8-1'b1:0]    channel2_data       ;
 wire                            frame_end_flag_2    ;
 wire [M_ADDR_WIDTH-1'b1:0]      channel3_addr       ;
 wire                            channel3_rvalid     ;
+wire                            channel3_rd_en      ;
 wire                            channel3_rready     ;
 wire [MEM_DQ_WIDTH*8-1'b1:0]    channel3_data       ;
 wire                            frame_end_flag_3    ;
 wire [M_ADDR_WIDTH-1'b1:0]      channel4_addr       ;
 wire                            channel4_rvalid     /* synthesis syn_keep = 1 */;
+wire                            channel4_rd_en      ;
 wire                            channel4_rready     /* synthesis syn_keep = 1 */;
 wire [MEM_DQ_WIDTH*8-1'b1:0]    channel4_data       ;
 wire                            frame_end_flag_4    ;
 wire [M_ADDR_WIDTH-1'b1:0]      channel5_addr       ;
 wire                            channel5_rvalid     ;
+wire                            channel5_rd_en      ;
 wire                            channel5_rready     ;
 wire [MEM_DQ_WIDTH*8-1'b1:0]    channel5_data       ;
 wire                            frame_end_flag_5    ;
@@ -153,6 +158,7 @@ video_sampling #(
     .rd_addr            (channel1_addr   ),
     .rd_clk             (ddr_clk    ),
     .rd_valid           (channel1_rvalid ),
+    .rd_en              (channel1_rd_en  ),
     .data_out_ready     (channel1_rready ),
     .rd_data            (channel1_data   ),
     .frame_end_flag     (frame_end_flag_1),
@@ -173,6 +179,7 @@ video_sampling #(
     .rd_addr            (channel2_addr   ),
     .rd_clk             (ddr_clk    ),
     .rd_valid           (channel2_rvalid ),
+    .rd_en              (channel2_rd_en  ),
     .data_out_ready     (channel2_rready ),
     .rd_data            (channel2_data   ),
     .frame_end_flag     (frame_end_flag_2),
@@ -193,6 +200,7 @@ video_sampling #(
     .rd_addr            (channel3_addr   ),
     .rd_clk             (ddr_clk    ),
     .rd_valid           (channel3_rvalid ),
+    .rd_en              (channel3_rd_en   ),
     .data_out_ready     (channel3_rready ),
     .rd_data            (channel3_data   ),
     .frame_end_flag     (frame_end_flag_3),
@@ -213,6 +221,7 @@ video_sampling #(
     .rd_addr            (channel4_addr   ),
     .rd_clk             (ddr_clk    ),
     .rd_valid           (channel4_rvalid ),
+    .rd_en              (channel4_rd_en  ),
     .data_out_ready     (channel4_rready ),
     .rd_data            (channel4_data   ),
     .frame_end_flag     (frame_end_flag_4),
@@ -283,6 +292,7 @@ video_sampling #(
     .rd_clk             (ddr_clk     ),
     .rd_addr            (channel5_addr    ),
     .rd_valid           (channel5_rvalid  ),
+    .rd_en              (channel5_rd_en   ),
     .data_out_ready     (channel5_rready  ),
     .rd_data            (channel5_data    ),
     .frame_end_flag     (frame_end_flag_5 ),
@@ -297,30 +307,35 @@ axi_interconnect_wr u_axi_interconnect_wr(
 
     .channel1_addr                  (channel1_addr   ),
     .channel1_rvalid                (channel1_rvalid ),
+    .channel1_rd_en                 (channel1_rd_en  ),
     .channel1_rready                (channel1_rready ),
     .channel1_data                  (channel1_data   ),
     .frame_end_flag_1               (frame_end_flag_1),
 
     .channel2_addr                  (channel2_addr   ),
     .channel2_rvalid                (channel2_rvalid ),
+    .channel2_rd_en                 (channel2_rd_en  ),
     .channel2_rready                (channel2_rready ),
     .channel2_data                  (channel2_data   ),
     .frame_end_flag_2               (frame_end_flag_2),
 
     .channel3_addr                  (channel3_addr   ),
     .channel3_rvalid                (channel3_rvalid ),
+    .channel3_rd_en                 (channel3_rd_en  ),
     .channel3_rready                (channel3_rready ),
     .channel3_data                  (channel3_data   ),
     .frame_end_flag_3               (frame_end_flag_3),
 
     .channel4_addr                  (channel4_addr   ),
     .channel4_rvalid                (channel4_rvalid ),
+    .channel4_rd_en                 (channel4_rd_en  ),
     .channel4_rready                (channel4_rready ),
     .channel4_data                  (channel4_data   ),
     .frame_end_flag_4               (frame_end_flag_4),
 
     .channel5_addr                  (channel5_addr   ),
     .channel5_rvalid                (channel5_rvalid ),
+    .channel5_rd_en                 (channel5_rd_en  ),
     .channel5_rready                (channel5_rready ),
     .channel5_data                  (channel5_data   ),
     .frame_end_flag_5               (frame_end_flag_5),

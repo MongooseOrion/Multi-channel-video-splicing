@@ -43,6 +43,7 @@ module hdmi_data_in(
 wire        pose_vs_in;
 wire        nege_vs_in;
 
+reg         vs_out_temp;
 reg [15:0]  rgb565_temp;
 reg         vs_in_1;
 reg         de_out_temp;
@@ -51,7 +52,7 @@ reg [1:0]   frame_count;
 
 
 assign pose_vs_in = ((vs_in) && (~vs_in_1)) ? 1'b1 : 1'b0;
-assign nege_vs_in = ((~vs_in) && (vs_in_1)) ? 1'b1 : 1'b1;
+assign nege_vs_in = ((~vs_in) && (vs_in_1)) ? 1'b1 : 1'b0;
 
 
 // 检查第一个场同步信号，然后数据有效
@@ -64,6 +65,19 @@ always @(posedge hdmi_pix_clk_in or negedge rst) begin
         vs_in_1 <= vs_in;
     end
 end
+
+// 场同步信号第二帧拉平
+always @(posedge hdmi_pix_clk_in or negedge rst) begin
+    if (!rst) begin
+        vs_out_temp <= 1'b0;
+    end
+    else if(frame_count == 2'd1) begin
+        vs_out_temp <= vs_in_1;
+    end
+    else begin
+        vs_out_temp <= 1'b0;
+    end
+end
 assign vs_out = vs_in_1;
 
 
@@ -72,11 +86,13 @@ always @(posedge hdmi_pix_clk_in or negedge rst) begin
     if(!rst) begin
         frame_count <= 'b0;
     end
-    else if((pose_vs_in == 1'b1) && (frame_count == 2'd2)) begin
-        frame_count <= 2'd1;
-    end
     else if(pose_vs_in) begin
-        frame_count <= frame_count + 1'b1;
+        if(frame_count == 2'd2) begin
+            frame_count <= 2'd1;
+        end
+        else begin
+            frame_count <= frame_count + 1'b1;
+        end
     end
     else begin
         frame_count <= frame_count;

@@ -23,7 +23,7 @@
 * FILE ENCODER TYPE: GBK
 * ========================================================================
 */
-// 对各图像输入数据模块进行循环 AXI 输入，以将各图像保存到不同的 ddr 地址区域
+// 将 buf 数据通过 axi 写入 ddr（基于乱序和 outstanding）
 //
 module axi_interconnect_wr #(
     parameter MEM_ROW_WIDTH        = 15    ,
@@ -42,36 +42,34 @@ module axi_interconnect_wr #(
     input                               clk,                // ddr core clk
     input                               rst,
     // 通道 1
-    output reg  [M_ADDR_WIDTH-1'b1:0]   channel1_addr   ,
-    output reg                          channel1_rvalid ,
     input                               channel1_rready ,
     input       [DQ_WIDTH*8-1'b1:0]     channel1_data   ,
-    input                               frame_end_flag_1,
+    input                               channel1_vsync  ,
+    output reg                          channel1_rd_en  ,
     // 通道 2
-    output reg  [M_ADDR_WIDTH-1'b1:0]   channel2_addr   ,
-    output reg                          channel2_rvalid ,
     input                               channel2_rready ,
     input       [DQ_WIDTH*8-1'b1:0]     channel2_data   ,
-    input                               frame_end_flag_2,
+    input                               channel2_vsync  ,
+    output reg                          channel2_rd_en  ,
     // 通道 3
-    output reg  [M_ADDR_WIDTH-1'b1:0]   channel3_addr   ,
-    output reg                          channel3_rvalid ,
     input                               channel3_rready ,
     input       [DQ_WIDTH*8-1'b1:0]     channel3_data   ,
-    input                               frame_end_flag_3,
+    input                               channel3_vsync  ,
+    output reg                          channel3_rd_en  ,
     // 通道 4
-    output reg  [M_ADDR_WIDTH-1'b1:0]   channel4_addr   ,
-    output reg                          channel4_rvalid ,
     input                               channel4_rready ,
     input       [DQ_WIDTH*8-1'b1:0]     channel4_data   ,
-    input                               frame_end_flag_4,
+    input                               channel4_vsync  ,
+    output reg                          channel4_rd_en  ,
     // 通道 5
-    output reg  [M_ADDR_WIDTH-1'b1:0]   channel5_addr   ,
-    output reg                          channel5_rvalid ,
     input                               channel5_rready ,
     input       [DQ_WIDTH*8-1'b1:0]     channel5_data   ,
-    input                               frame_end_flag_5,
+    input                               channel5_vsync  ,
+    output reg                          channel5_rd_en  ,
 
+    input                               processing_wait ,           // 需要进行图像处理，请等待
+    output reg                          wait_proceed    ,           // 操作成功指令
+    // 写完成，用于其他模块初始化
     output reg                          init_done       /*synthesis PAP_MARK_DEBUG="1"*/,
 
     // AXI WRITE INTERFACE
@@ -94,27 +92,40 @@ module axi_interconnect_wr #(
     output                              axi_bready      
 );
 
-parameter   INIT_WAIT = 4'b0000,       // 定义读取状态
-            CH_1 = 4'b0001,
-            CH2_WAIT = 4'b0010,
-            CH_2 = 4'b0011,
-            CH3_WAIT = 4'b0100,
-            CH_3 = 4'b0101,
-            CH4_WAIT = 4'b0110,
-            CH_4 = 4'b0111,
-            CH5_WAIT = 4'b1000,
-            CH_5 = 4'b1001;
+
 // 地址偏移量
 parameter FRAME_ADDR_OFFSET_1 = 'd30_000;
 parameter FRAME_ADDR_OFFSET_2 = 'd260_000;
 parameter   ADDR_OFFSET_1 = 'd0,                    
             ADDR_OFFSET_2 = FRAME_ADDR_OFFSET_1 * 2,  
-            ADDR_OFFSET_3 = ADDR_OFFSET_2 + 2 * (FRAME_ADDR_OFFSET_1),      // 
+            ADDR_OFFSET_3 = ADDR_OFFSET_2 + 2 * (FRAME_ADDR_OFFSET_1),
             ADDR_OFFSET_4 = ADDR_OFFSET_3 + 2 * (FRAME_ADDR_OFFSET_1),
             ADDR_OFFSET_5 = ADDR_OFFSET_4 + 2 * (FRAME_ADDR_OFFSET_1);
 parameter ADDR_STEP = BURST_LEN * 8;       // 首地址自增步长，1 个地址 32 位数据，这与芯片的 DQ 宽度有关
+// 状态机轮询
+parameter   INIT_WAIT = 4'd0,
+            CH1_WAIT = 4'd1,
+            CH1_ADDR = 4'd2,
+            CH1_DATA = 4'd3,
+            CH2_WAIT = 4'd4,
+            CH2_ADDR = 4'd5,
+            CH2_DATA = 4'd6,
+            CH3_WAIT = 4'd7,
+            CH3_ADDR = 4'd8,
+            CH3_DATA = 4'd9,
+            CH4_WAIT = 4'd10,
+            CH4_ADDR = 4'd11,
+            CH4_DATA = 4'd12,
+            CH5_WAIT = 4'd13,
+            CH5_ADDR = 4'd14,
+            CH5_DATA = 4'd15;
 
-wire                            pose_axi_wready ;
+wire                            vs_1;
+wire                            vs_2;
+wire                            vs_3;
+wire                            vs_4;
+wire                            vs_5;
+wire                            pose_awvalid;
 
 reg [CTRL_ADDR_WIDTH-1:0]       reg_axi_awaddr  ;
 reg                             reg_axi_awvalid ;
@@ -124,25 +135,37 @@ reg                             reg_axi_bready  ;
 reg                             reg_axi_rready  ;
 
 reg [3:0]                       buf_rd_state        ;
-reg                             axi_wr_en           ;
-reg                             axi_wready_temp     ;
-reg [4:0]                       burst_len_count     ;
-reg                             addr_head_flag      ;
-reg [DQ_WIDTH*8-1'b1:0]         channel1_data_d1    ;
-reg [DQ_WIDTH*8-1'b1:0]         channel2_data_d1    ;
-reg [DQ_WIDTH*8-1'b1:0]         channel3_data_d1    ;
-reg [DQ_WIDTH*8-1'b1:0]         channel4_data_d1    ;
-reg [DQ_WIDTH*8-1'b1:0]         channel5_data_d1    ;
-reg [1:0]                       frame_addr_count_1  ;
-reg [1:0]                       frame_addr_count_2  ;
-reg [1:0]                       frame_addr_count_3  ;
-reg [1:0]                       frame_addr_count_4  ;
-reg [1:0]                       frame_addr_count_5  ;
-reg [CTRL_ADDR_WIDTH-1:0]       reg_axi_awaddr_1    ;
-reg [CTRL_ADDR_WIDTH-1:0]       reg_axi_awaddr_2    ;
-reg [CTRL_ADDR_WIDTH-1:0]       reg_axi_awaddr_3    ;
-reg [CTRL_ADDR_WIDTH-1:0]       reg_axi_awaddr_4    ;
-reg [CTRL_ADDR_WIDTH-1:0]       reg_axi_awaddr_5    ;
+reg                             channel1_vs         ;
+reg                             channel1_vs_d1      ;
+reg                             channel2_vs         ;
+reg                             channel2_vs_d1      ;
+reg                             channel3_vs         ;
+reg                             channel3_vs_d1      ;
+reg                             channel4_vs         ;
+reg                             channel4_vs_d1      ;
+reg                             channel5_vs         ;
+reg                             channel5_vs_d1      ;
+reg [1:0]                       frame_count_1       ;
+reg [1:0]                       frame_count_2       ;
+reg [1:0]                       frame_count_3       ;
+reg [1:0]                       frame_count_4       ;
+reg [1:0]                       frame_count_5       ;
+reg                             awvalid_temp        ;
+reg [10:0]                      reg_axi_awaddr_1    ;
+reg [10:0]                      reg_axi_awaddr_2    ;
+reg [10:0]                      reg_axi_awaddr_3    ;
+reg [10:0]                      reg_axi_awaddr_4    ;
+reg [10:0]                      reg_axi_awaddr_5    ;
+reg                             read_flag_1         ;
+reg                             read_flag_2         ;
+reg                             read_flag_3         ;
+reg                             read_flag_4         ;
+reg                             read_flag_5         ;
+reg                             pre_rd_en_1         ;
+reg                             pre_rd_en_2         ;
+reg                             pre_rd_en_3         ;
+reg                             pre_rd_en_4         ;
+reg                             pre_rd_en_5         ;
 
 assign axi_awaddr   = reg_axi_awaddr        ;
 assign axi_awvalid  = reg_axi_awvalid       ;
@@ -154,24 +177,41 @@ assign axi_wvalid   = reg_axi_wvalid        ;
 assign axi_wstrb    = {DQ_WIDTH{1'b1}}      ;
 assign axi_bready   = reg_axi_bready        ;
 
+assign pose_awvalid = ((awvalid_temp) && (~reg_axi_awvalid)) ? 1'b1 : 1'b0;
 
-// 取数据状态机跳转
+
+// 状态机跳转
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
         buf_rd_state <= 'b0;
     end
     else begin
         case(buf_rd_state)
-            INIT_WAIT: begin                // 握手 buf 传输协议，以及准备好 axi 写首地址
-                if((channel1_rready == 1'b1) && (axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
-                    buf_rd_state <= CH_1;
-                end
-                else begin
+            INIT_WAIT: begin
+                if(processing_wait == 1'b1) begin
                     buf_rd_state <= INIT_WAIT;
                 end
+                else begin
+                    buf_rd_state <= CH1_WAIT;
+                end
             end
-            CH_1: begin                     // 提取 buf 数据，并送入 axi 写通道
-                //if((axi_bready == 1'b1) && (axi_bvalid == 1'b1)) begin
+            CH1_WAIT: begin
+                if(channel1_rready == 1'b0) begin
+                    buf_rd_state <= CH2_WAIT;
+                end
+                else begin
+                    buf_rd_state <= CH1_ADDR;
+                end
+            end
+            CH1_ADDR: begin
+                if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
+                    buf_rd_state <= CH1_DATA;
+                end
+                else begin
+                    buf_rd_state <= buf_rd_state;
+                end
+            end
+            CH1_DATA: begin
                 if(axi_wlast) begin
                     buf_rd_state <= CH2_WAIT;
                 end
@@ -180,15 +220,22 @@ always @(posedge clk or negedge rst) begin
                 end
             end
             CH2_WAIT: begin
-                if((channel2_rready == 1'b1) && (axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
-                    buf_rd_state <= CH_2;
+                if(channel2_rready == 1'b0) begin
+                    buf_rd_state <= CH3_WAIT;
+                end
+                else begin
+                    buf_rd_state <= CH2_ADDR;
+                end
+            end
+            CH2_ADDR: begin
+                if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
+                    buf_rd_state <= CH2_DATA;
                 end
                 else begin
                     buf_rd_state <= buf_rd_state;
                 end
             end
-            CH_2: begin
-                //if((axi_bready == 1'b1) && (axi_bvalid == 1'b1)) begin
+            CH2_DATA: begin
                 if(axi_wlast) begin
                     buf_rd_state <= CH3_WAIT;
                 end
@@ -197,15 +244,22 @@ always @(posedge clk or negedge rst) begin
                 end
             end
             CH3_WAIT: begin
-                if((channel3_rready == 1'b1) && (axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
-                    buf_rd_state <= CH_3;
+                if(channel3_rready == 1'b0) begin
+                    buf_rd_state <= CH4_WAIT;
+                end
+                else begin
+                    buf_rd_state <= CH3_ADDR;
+                end
+            end
+            CH3_ADDR: begin
+                if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
+                    buf_rd_state <= CH3_DATA;
                 end
                 else begin
                     buf_rd_state <= buf_rd_state;
                 end
             end
-            CH_3: begin
-                //if((axi_bready == 1'b1) && (axi_bvalid == 1'b1)) begin
+            CH3_DATA: begin
                 if(axi_wlast) begin
                     buf_rd_state <= CH4_WAIT;
                 end
@@ -214,15 +268,22 @@ always @(posedge clk or negedge rst) begin
                 end
             end
             CH4_WAIT: begin
-                if((channel4_rready == 1'b1) && (axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
-                    buf_rd_state <= CH_4;
+                if(channel4_rready == 1'b0) begin
+                    buf_rd_state <= CH5_WAIT;
+                end
+                else begin
+                    buf_rd_state <= CH4_ADDR;
+                end
+            end
+            CH4_ADDR: begin
+                if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
+                    buf_rd_state <= CH4_DATA;
                 end
                 else begin
                     buf_rd_state <= buf_rd_state;
                 end
             end
-            CH_4: begin
-                //if((axi_bready == 1'b1) && (axi_bvalid == 1'b1))begin
+            CH4_DATA: begin
                 if(axi_wlast) begin
                     buf_rd_state <= CH5_WAIT;
                 end
@@ -231,16 +292,26 @@ always @(posedge clk or negedge rst) begin
                 end
             end
             CH5_WAIT: begin
-                if((channel5_rready == 1'b1) && (axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
-                    buf_rd_state <= CH_5;
+                if(channel5_rready == 1'b0) begin
+                    buf_rd_state <= CH1_WAIT;
+                end
+                else begin
+                    buf_rd_state <= CH5_ADDR;
+                end
+            end
+            CH5_ADDR: begin
+                if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
+                    buf_rd_state <= CH5_DATA;
                 end
                 else begin
                     buf_rd_state <= buf_rd_state;
                 end
             end
-            CH_5: begin
-                //if((axi_bready == 1'b1) && (axi_bvalid == 1'b1)) begin
-                if(axi_wlast) begin
+            CH5_ADDR: begin
+                if((axi_wlast === 1'b1) && (processing_wait == 1'b0)) begin
+                    buf_rd_state <= CH1_WAIT;
+                end
+                else if((axi_wlast == 1'b1) && (processing_wait == 1'b1)) begin
                     buf_rd_state <= INIT_WAIT;
                 end
                 else begin
@@ -253,558 +324,467 @@ always @(posedge clk or negedge rst) begin
 end
 
 
-// 状态机内部关于握手的信号
+// 传回强制等待操作成功指令
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
-        channel1_rvalid <= 'b0;
-        channel2_rvalid <= 'b0;
-        channel3_rvalid <= 'b0;
-        channel4_rvalid <= 'b0;
-        channel5_rvalid <= 'b0;
-        reg_axi_awvalid <= 'b0;
-        reg_axi_wvalid <= 'b0;
+        wait_proceed <= 'b0;
+    end
+    else if((processing_wait == 1'b1) && (buf_rd_state == INIT_WAIT)) begin
+        wait_proceed <= 1'b1;
+    end
+    else if(processing_wait) begin
+        wait_proceed <= 1'b0;
     end
     else begin
-        case(buf_rd_state)
-            INIT_WAIT: begin
-                if(channel1_rready) begin               // buf 读握手
-                    channel1_rvalid <= 1'b0;
-                end
-                else begin
-                    channel1_rvalid <= 1'b1;
-                end
-                if((channel1_rready == 1'b1) && (channel1_rvalid == 1'b1)) begin    // axi 写地址握手
-                    reg_axi_awvalid <= 1'b1;
-                end
-                else if((axi_awready == 1'b1) && (axi_awvalid == 1'b1)) begin
-                    reg_axi_awvalid <= 1'b0;
-                end
-                else begin
-                    reg_axi_awvalid <= reg_axi_awvalid;
-                end
-            end
-            CH_1: begin
-                if(axi_wlast) begin
-                    reg_axi_wvalid <= 1'b0;
-                end
-                else begin
-                    reg_axi_wvalid <= 1'b1;
-                end
-            end
-            CH2_WAIT: begin
-                if(channel2_rready) begin               // buf 读握手
-                    channel2_rvalid <= 1'b0;
-                end
-                else begin
-                    channel2_rvalid <= 1'b1;
-                end
-                if((channel2_rready == 1'b1) && (channel2_rvalid == 1'b1)) begin    // axi 写地址握手
-                    reg_axi_awvalid <= 1'b1;
-                end
-                else if((axi_awready == 1'b1) && (axi_awvalid == 1'b1)) begin
-                    reg_axi_awvalid <= 1'b0;
-                end
-                else begin
-                    reg_axi_awvalid <= reg_axi_awvalid;
-                end
-            end
-            CH_2: begin
-                if(axi_wlast) begin
-                    reg_axi_wvalid <= 1'b0;
-                end
-                else begin
-                    reg_axi_wvalid <= 1'b1;
-                end
-            end
-            CH3_WAIT: begin
-                if(channel3_rready) begin               // buf 读握手
-                    channel3_rvalid <= 1'b0;
-                end
-                else begin
-                    channel3_rvalid <= 1'b1;
-                end
-                if((channel3_rready == 1'b1) && (channel3_rvalid == 1'b1)) begin    // axi 写地址握手
-                    reg_axi_awvalid <= 1'b1;
-                end
-                else if((axi_awready == 1'b1) && (axi_awvalid == 1'b1)) begin
-                    reg_axi_awvalid <= 1'b0;
-                end
-                else begin
-                    reg_axi_awvalid <= reg_axi_awvalid;
-                end
-            end
-            CH_3: begin
-                if(axi_wlast) begin
-                    reg_axi_wvalid <= 1'b0;
-                end
-                else begin
-                    reg_axi_wvalid <= 1'b1;
-                end
-            end
-            CH4_WAIT: begin
-                if(channel4_rready) begin               // buf 读握手
-                    channel4_rvalid <= 1'b0;
-                end
-                else begin
-                    channel4_rvalid <= 1'b1;
-                end
-                if((channel4_rready == 1'b1) && (channel4_rvalid == 1'b1)) begin    // axi 写地址握手
-                    reg_axi_awvalid <= 1'b1;
-                end
-                else if((axi_awready == 1'b1) && (axi_awvalid == 1'b1)) begin
-                    reg_axi_awvalid <= 1'b0;
-                end
-                else begin
-                    reg_axi_awvalid <= reg_axi_awvalid;
-                end
-            end
-            CH_4: begin
-                if(axi_wlast) begin
-                    reg_axi_wvalid <= 1'b0;
-                end
-                else begin
-                    reg_axi_wvalid <= 1'b1;
-                end
-            end
-            CH5_WAIT: begin
-                if(channel5_rready) begin               // buf 读握手
-                    channel5_rvalid <= 1'b0;
-                end
-                else begin
-                    channel5_rvalid <= 1'b1;
-                end
-                if((channel5_rready == 1'b1) && (channel5_rvalid == 1'b1)) begin    // axi 写地址握手
-                    reg_axi_awvalid <= 1'b1;
-                end
-                else if((axi_awready == 1'b1) && (axi_awvalid == 1'b1)) begin
-                    reg_axi_awvalid <= 1'b0;
-                end
-                else begin
-                    reg_axi_awvalid <= reg_axi_awvalid;
-                end
-            end
-            CH_5: begin
-                if(axi_wlast) begin
-                    reg_axi_wvalid <= 1'b0;
-                end
-                else begin
-                    reg_axi_wvalid <= 1'b1;
-                end
-            end
-            default: begin
-                channel1_rvalid <= 1'b0;
-                channel2_rvalid <= 1'b0;
-                channel3_rvalid <= 1'b0;
-                channel4_rvalid <= 1'b0;
-                channel5_rvalid <= 1'b0;
-                reg_axi_awvalid <= 1'b0;
-                reg_axi_wvalid <= 1'b0;
-            end
-        endcase
+        wait_proceed <= wait_proceed;
     end
 end
 
 
-// 突发长度计数
+// 根据场同步信号生成帧索引
+// 先进行重采样，确保所有的场同步信号只拉高一个周期
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
-        burst_len_count <= 'b0;
+        channel1_vs <= 'b0;
+        channel1_vs_d1 <= 'b0;
+        channel2_vs <= 'b0;
+        channel2_vs_d1 <= 'b0;
+        channel3_vs <= 'b0;
+        channel3_vs_d1 <= 'b0;
+        channel4_vs <= 'b0;
+        channel4_vs_d1 <= 'b0;
+        channel5_vs <= 'b0;
+        channel5_vs_d1 <= 'b0;
     end
-    else if((axi_wvalid == 1'b1) && (axi_wready == 1'b1)) begin
-        if(burst_len_count == BURST_LEN - 1'b1) begin
-            burst_len_count <= 'b0;
+    else begin
+        channel1_vs <= channel1_vsync;
+        channel1_vs_d1 <= channel1_vs;
+        channel2_vs <= channel2_vsync;
+        channel2_vs_d1 <= channel2_vs;
+        channel3_vs <= channel3_vsync;
+        channel3_vs_d1 <= channel3_vs;
+        channel4_vs <= channel4_vsync;
+        channel4_vs_d1 <= channel4_vs;
+        channel5_vs <= channel5_vsync;
+        channel5_vs_d1 <= channel5_vs;
+    end
+end
+
+assign vs_1 = ((channel1_vs) && (~channel1_vs_d1)) ? 1'b1 : 1'b0;
+assign vs_2 = ((channel2_vs) && (~channel2_vs_d1)) ? 1'b1 : 1'b0;
+assign vs_3 = ((channel3_vs) && (~channel3_vs_d1)) ? 1'b1 : 1'b0;
+assign vs_4 = ((channel4_vs) && (~channel4_vs_d1)) ? 1'b1 : 1'b0;
+assign vs_5 = ((channel5_vs) && (~channel5_vs_d1)) ? 1'b1 : 1'b0;
+
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        frame_count_1 <= 'b0;
+        frame_count_2 <= 'b0;
+        frame_count_3 <= 'b0;
+        frame_count_4 <= 'b0;
+        frame_count_5 <= 'b0;
+    end
+    else begin
+        if(vs_1) begin
+            if(frame_count_1 == 2'd2) begin
+                frame_count_1 <= 2'd1;
+            end
+            else begin
+                frame_count_1 <= frame_count_1 + 1'b1;
+            end
         end
         else begin
-            burst_len_count <= burst_len_count + 1'b1;
+            frame_count_1 <= frame_count_1;
+        end
+        if(vs_2) begin
+            if(frame_count_2 == 2'd2) begin
+                frame_count_2 <= 2'd1;
+            end
+            else begin
+                frame_count_2 <= frame_count_2 + 1'b1;
+            end
+        end
+        else begin
+            frame_count_2 <= frame_count_2;
+        end
+        if(vs_3) begin
+            if(frame_count_3 == 2'd2) begin
+                frame_count_3 <= 2'd1;
+            end
+            else begin
+                frame_count_3 <= frame_count_3 + 1'b1;
+            end
+        end
+        else begin
+            frame_count_3 <= frame_count_3;
+        end
+        if(vs_4) begin
+            if(frame_count_4 == 2'd2) begin
+                frame_count_4 <= 2'd1;
+            end
+            else begin
+                frame_count_4 <= frame_count_4 + 1'b1;
+            end
+        end
+        else begin
+            frame_count_4 <= frame_count_4;
+        end
+        if(vs_5) begin
+            if(frame_count_5 == 2'd2) begin
+                frame_count_5 <= 2'd1;
+            end
+            else begin
+                frame_count_5 <= frame_count_5 + 1'b1;
+            end
+        end
+        else begin
+            frame_count_5 <= frame_count_5;
         end
     end
-    else begin
-        burst_len_count <= 5'b0;
-    end
 end
 
 
-// 指示在读 buf 阶段先写入一个读地址，然后等待
+// 状态机的内部信号
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
-        addr_head_flag <= 'b0;
-    end
-    else if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
-        addr_head_flag <= 1'b1;
-    end
-    else begin
-        addr_head_flag <= 1'b0;
-    end
-end
-
-
-// wready 上升沿检测
-always @(posedge clk or negedge rst) begin
-    if(!rst) begin
-        axi_wready_temp <= 'b0;
-    end
-    else begin
-        axi_wready_temp <= axi_wready;
-    end
-end
-assign pose_axi_wready = ((axi_wready) && (~axi_wready_temp)) ? 1'b1 : 1'b0;
-
-
-// 向外（buffer）发出读地址请求，这必须在 AXI 总线的 wvalid 拉高后马上送
-always @(posedge clk or negedge rst) begin
-    if(!rst) begin
-        channel1_addr <= 'b0;
-        channel2_addr <= 'b0;
-        channel3_addr <= 'b0;
-        channel4_addr <= 'b0;
-        channel5_addr <= 'b0;
-        frame_addr_count_1 <= 'b0;
-        frame_addr_count_2 <= 'b0;
-        frame_addr_count_3 <= 'b0;
-        frame_addr_count_4 <= 'b0;
-        frame_addr_count_5 <= 'b0;
+        awvalid_temp <= 'b0;
+        reg_axi_awvalid <= 'b0;
         reg_axi_awaddr_1 <= 'b0;
         reg_axi_awaddr_2 <= 'b0;
         reg_axi_awaddr_3 <= 'b0;
         reg_axi_awaddr_4 <= 'b0;
         reg_axi_awaddr_5 <= 'b0;
         reg_axi_awaddr <= 'b0;
-        channel1_data_d1 <= 'b0;
-        channel2_data_d1 <= 'b0;
-        channel3_data_d1 <= 'b0;
-        channel4_data_d1 <= 'b0;
-        channel5_data_d1 <= 'b0;
+        read_flag_1 <= 'b0;
+        read_flag_2 <= 'b0;
+        read_flag_3 <= 'b0;
+        read_flag_4 <= 'b0;
+        read_flag_5 <= 'b0;
+        pre_rd_en_1 <= 'b0;
+        pre_rd_en_2 <= 'b0;
+        pre_rd_en_3 <= 'b0;
+        pre_rd_en_4 <= 'b0;
+        pre_rd_en_5 <= 'b0;
+    end
+    else if(vs_1) begin
+        reg_axi_awaddr_1 <= 'b0;
+    end
+    else if(vs_2) begin
+        reg_axi_awaddr_2 <= 'b0;
+    end
+    else if(vs_3) begin
+        reg_axi_awaddr_3 <= 'b0;
+    end
+    else if(vs_4) begin
+        reg_axi_awaddr_4 <= 'b0;
+    end
+    else if(vs_5) begin
+        reg_axi_awaddr_5 <= 'b0;
     end
     else begin
         case(buf_rd_state)
-            INIT_WAIT: begin
-                if(frame_addr_count_1 == 2'd0) begin
-                    if((channel1_rvalid == 1'b1) && (channel1_rready == 1'b1)) begin
-                        reg_axi_awaddr <= ADDR_OFFSET_1 + reg_axi_awaddr_1;         // 没握手之前生成首地址
+            CH1_ADDR: begin
+                // 握手设置
+                if(axi_awready) begin
+                    awvalid_temp <= 1'b0;
+                    reg_axi_awvalid <= 1'b0;
+                end
+                else begin
+                    awvalid_temp <= 1'b1;
+                    reg_axi_awvalid <= awvalid_temp;
+                end
+                // 地址设置
+                if(frame_count_1 == 2'd1) begin                         // 帧 1 使用基地址 1
+                    if(pose_awvalid) begin                              // 没握手之前生成首地址
+                        reg_axi_awaddr <= ADDR_OFFSET_1 + reg_axi_awaddr_1;
                     end
                     else if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
                         reg_axi_awaddr_1 <= reg_axi_awaddr_1 + ADDR_STEP;
                     end
                     else begin
-                        reg_axi_awaddr_1 <= reg_axi_awaddr_1;
                         reg_axi_awaddr <= reg_axi_awaddr;
+                        reg_axi_awaddr_1 <= reg_axi_awaddr_1;
                     end
                 end
-                else if(frame_addr_count_1 == 2'd1) begin
-                    if((channel1_rvalid == 1'b1) && (channel1_rready == 1'b1)) begin
+                else if(frame_count_1 == 2'd2) begin                    // 帧 2 使用基地址 2
+                    if(pose_awvalid) begin                              // 没握手之前生成首地址
                         reg_axi_awaddr <= ADDR_OFFSET_1 + FRAME_ADDR_OFFSET_1 + reg_axi_awaddr_1;
                     end
                     else if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
                         reg_axi_awaddr_1 <= reg_axi_awaddr_1 + ADDR_STEP;
                     end
                     else begin
-                        reg_axi_awaddr_1 <= reg_axi_awaddr_1;
                         reg_axi_awaddr <= reg_axi_awaddr;
+                        reg_axi_awaddr_1 <= reg_axi_awaddr_1;
                     end
                 end
+                // 预读取设置
+                if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
+                    read_flag_1 <= 1'b1;
+                    if(read_flag_1 == 1'b0) pre_rd_en_1 <= 1'b1;
+                    else pre_rd_en_1 <= 1'b0;
+                end
                 else begin
-                    reg_axi_awaddr_1 <= 'b0;
-                    reg_axi_awaddr <= 'b0;
+                    read_flag_1 <= read_flag_1;                 // 上电后变化一次后，不再变化        
+                end 
+            end
+            CH1_DATA: begin
+                if(pre_rd_en_1) begin
+                    pre_rd_en_1 <= 1'b0;
                 end
             end
-            CH_1: begin
-                if(addr_head_flag) begin
-                    channel1_addr <= channel1_addr + 1'b1;
-                    channel1_data_d1 <= channel1_data;
-                end
-                else if((axi_wvalid == 1'b1) && (axi_wready == 1'b1) && (burst_len_count < BURST_LEN - 1'b1)) begin
-                    channel1_addr <= channel1_addr + 1'b1;
+            CH2_ADDR: begin
+                // 握手设置
+                if(axi_awready) begin
+                    awvalid_temp <= 1'b0;
+                    reg_axi_awvalid <= 1'b0;
                 end
                 else begin
-                    channel1_addr <= channel1_addr;
+                    awvalid_temp <= 1'b1;
+                    reg_axi_awvalid <= awvalid_temp;
                 end
-                if(frame_end_flag_1) begin 
-                    reg_axi_awaddr_1 <= 'b0;                    // 指示帧结束信号来临时，用于累加的地址信号必须清零
-                    if(frame_addr_count_1 == 2'd1) begin        // 每帧结束地址偏移计数信号
-                        frame_addr_count_1 <= 2'b0;
-                    end
-                    else begin
-                        frame_addr_count_1 <= frame_addr_count_1 + 1'b1;
-                    end
-                end
-                else begin
-                    reg_axi_awaddr_1 <= reg_axi_awaddr_1;
-                    frame_addr_count_1 <= frame_addr_count_1;
-                end
-            end
-            CH2_WAIT: begin
-                if(frame_addr_count_2 == 2'd0) begin
-                    if((channel2_rvalid == 1'b1) && (channel2_rready == 1'b1)) begin
-                        reg_axi_awaddr <= ADDR_OFFSET_2 + reg_axi_awaddr_2;         // 没握手之前生成首地址
+                // 地址设置
+                if(frame_count_2 == 2'd1) begin                         // 帧 1 使用基地址 1
+                    if(pose_awvalid) begin                              // 没握手之前生成首地址
+                        reg_axi_awaddr <= ADDR_OFFSET_2 + reg_axi_awaddr_2;
                     end
                     else if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
                         reg_axi_awaddr_2 <= reg_axi_awaddr_2 + ADDR_STEP;
                     end
                     else begin
-                        reg_axi_awaddr_2 <= reg_axi_awaddr_2;
                         reg_axi_awaddr <= reg_axi_awaddr;
+                        reg_axi_awaddr_2 <= reg_axi_awaddr_2;
                     end
                 end
-                else if(frame_addr_count_2 == 2'd1) begin
-                    if((channel2_rvalid == 1'b1) && (channel2_rready == 1'b1)) begin
+                else if(frame_count_2 == 2'd2) begin                    // 帧 2 使用基地址 2
+                    if(pose_awvalid) begin                              // 没握手之前生成首地址
                         reg_axi_awaddr <= ADDR_OFFSET_2 + FRAME_ADDR_OFFSET_1 + reg_axi_awaddr_2;
                     end
                     else if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
                         reg_axi_awaddr_2 <= reg_axi_awaddr_2 + ADDR_STEP;
                     end
                     else begin
-                        reg_axi_awaddr_2 <= reg_axi_awaddr_2;
                         reg_axi_awaddr <= reg_axi_awaddr;
+                        reg_axi_awaddr_2 <= reg_axi_awaddr_2;
                     end
                 end
+                // 预读取设置
+                if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
+                    read_flag_2 <= 1'b1;
+                    if(read_flag_2 == 1'b0) pre_rd_en_2 <= 1'b1;
+                    else pre_rd_en_2 <= 1'b0;
+                end
                 else begin
-                    reg_axi_awaddr_2 <= 'b0;
-                    reg_axi_awaddr <= 'b0;
+                    read_flag_2 <= read_flag_2;                 // 上电后变化一次后，不再变化        
+                end 
+            end
+            CH2_DATA: begin
+                if(pre_rd_en_2) begin
+                    pre_rd_en_2 <= 1'b0;
                 end
             end
-            CH_2: begin
-                if(addr_head_flag) begin
-                    channel2_addr <= channel2_addr + 1'b1;
-                    channel2_data_d1 <= channel2_data;
-                end
-                else if((axi_wvalid == 1'b1) && (axi_wready == 1'b1) && (burst_len_count < BURST_LEN - 1'b1)) begin
-                    channel2_addr <= channel2_addr + 1'b1;
+            CH3_ADDR: begin
+                // 握手设置
+                if(axi_awready) begin
+                    awvalid_temp <= 1'b0;
+                    reg_axi_awvalid <= 1'b0;
                 end
                 else begin
-                    channel2_addr <= channel2_addr;
+                    awvalid_temp <= 1'b1;
+                    reg_axi_awvalid <= awvalid_temp;
                 end
-                if(frame_end_flag_2) begin 
-                    reg_axi_awaddr_2 <= 'b0;                    // 指示帧结束信号来临时，用于累加的地址信号必须清零
-                    if(frame_addr_count_2 == 2'd1) begin        // 每帧结束地址偏移计数信号
-                        frame_addr_count_2 <= 2'b0;
-                    end
-                    else begin
-                        frame_addr_count_2 <= frame_addr_count_2 + 1'b1;
-                    end
-                end
-                else begin
-                    reg_axi_awaddr_2 <= reg_axi_awaddr_2;
-                    frame_addr_count_2 <= frame_addr_count_2;
-                end
-            end
-            CH3_WAIT: begin
-                if(frame_addr_count_3 == 2'd0) begin
-                    if((channel3_rvalid == 1'b1) && (channel3_rready == 1'b1)) begin
-                        reg_axi_awaddr <= ADDR_OFFSET_3 + reg_axi_awaddr_3;         // 没握手之前生成首地址
+                // 地址设置
+                if(frame_count_3 == 2'd1) begin                         // 帧 1 使用基地址 1
+                    if(pose_awvalid) begin                              // 没握手之前生成首地址
+                        reg_axi_awaddr <= ADDR_OFFSET_3 + reg_axi_awaddr_3;
                     end
                     else if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
                         reg_axi_awaddr_3 <= reg_axi_awaddr_3 + ADDR_STEP;
                     end
                     else begin
-                        reg_axi_awaddr_3 <= reg_axi_awaddr_3;
                         reg_axi_awaddr <= reg_axi_awaddr;
+                        reg_axi_awaddr_3 <= reg_axi_awaddr_3;
                     end
                 end
-                else if(frame_addr_count_3 == 2'd1) begin
-                    if((channel3_rvalid == 1'b1) && (channel3_rready == 1'b1)) begin
+                else if(frame_count_3 == 2'd2) begin                    // 帧 2 使用基地址 2
+                    if(pose_awvalid) begin                              // 没握手之前生成首地址
                         reg_axi_awaddr <= ADDR_OFFSET_3 + FRAME_ADDR_OFFSET_1 + reg_axi_awaddr_3;
                     end
                     else if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
                         reg_axi_awaddr_3 <= reg_axi_awaddr_3 + ADDR_STEP;
                     end
                     else begin
-                        reg_axi_awaddr_3 <= reg_axi_awaddr_3;
                         reg_axi_awaddr <= reg_axi_awaddr;
+                        reg_axi_awaddr_3 <= reg_axi_awaddr_3;
                     end
                 end
+                // 预读取设置
+                if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
+                    read_flag_3 <= 1'b1;
+                    if(read_flag_3 == 1'b0) pre_rd_en_3 <= 1'b1;
+                    else pre_rd_en_3 <= 1'b0;
+                end
                 else begin
-                    reg_axi_awaddr_3 <= 'b0;
-                    reg_axi_awaddr <= 'b0;
+                    read_flag_3 <= read_flag_3;                 // 上电后变化一次后，不再变化        
+                end 
+            end
+            CH3_DATA: begin
+                if(pre_rd_en_3) begin
+                    pre_rd_en_3 <= 1'b0;
                 end
             end
-            CH_3: begin
-                if(addr_head_flag) begin
-                    channel3_addr <= channel3_addr + 1'b1;
-                    channel3_data_d1 <= channel3_data;
-                end
-                else if((axi_wvalid == 1'b1) && (axi_wready == 1'b1) && (burst_len_count < BURST_LEN - 1'b1)) begin
-                    channel3_addr <= channel3_addr + 1'b1;
+            CH4_ADDR: begin
+                // 握手设置
+                if(axi_awready) begin
+                    awvalid_temp <= 1'b0;
+                    reg_axi_awvalid <= 1'b0;
                 end
                 else begin
-                    channel3_addr <= channel3_addr;
+                    awvalid_temp <= 1'b1;
+                    reg_axi_awvalid <= awvalid_temp;
                 end
-                if(frame_end_flag_3) begin 
-                    reg_axi_awaddr_3 <= 'b0;                    // 指示帧结束信号来临时，用于累加的地址信号必须清零
-                    if(frame_addr_count_3 == 2'd1) begin        // 每帧结束地址偏移计数信号
-                        frame_addr_count_3 <= 2'b0;
-                    end
-                    else begin
-                        frame_addr_count_3 <= frame_addr_count_3 + 1'b1;
-                    end
-                end
-                else begin
-                    reg_axi_awaddr_3 <= reg_axi_awaddr_3;
-                    frame_addr_count_3 <= frame_addr_count_3;
-                end
-            end
-            CH4_WAIT: begin
-                if(frame_addr_count_4 == 2'd0) begin
-                    if((channel4_rvalid == 1'b1) && (channel4_rready == 1'b1)) begin
-                        reg_axi_awaddr <= ADDR_OFFSET_4 + reg_axi_awaddr_4;         // 没握手之前生成首地址
+                // 地址设置
+                if(frame_count_4 == 2'd1) begin                         // 帧 1 使用基地址 1
+                    if(pose_awvalid) begin                              // 没握手之前生成首地址
+                        reg_axi_awaddr <= ADDR_OFFSET_4 + reg_axi_awaddr_4;
                     end
                     else if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
                         reg_axi_awaddr_4 <= reg_axi_awaddr_4 + ADDR_STEP;
                     end
                     else begin
-                        reg_axi_awaddr_4 <= reg_axi_awaddr_4;
                         reg_axi_awaddr <= reg_axi_awaddr;
+                        reg_axi_awaddr_4 <= reg_axi_awaddr_4;
                     end
                 end
-                else if(frame_addr_count_4 == 2'd1) begin
-                    if((channel4_rvalid == 1'b1) && (channel4_rready == 1'b1)) begin
+                else if(frame_count_4 == 2'd2) begin                    // 帧 2 使用基地址 2
+                    if(pose_awvalid) begin                              // 没握手之前生成首地址
                         reg_axi_awaddr <= ADDR_OFFSET_4 + FRAME_ADDR_OFFSET_1 + reg_axi_awaddr_4;
                     end
                     else if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
                         reg_axi_awaddr_4 <= reg_axi_awaddr_4 + ADDR_STEP;
                     end
                     else begin
-                        reg_axi_awaddr_4 <= reg_axi_awaddr_4;
                         reg_axi_awaddr <= reg_axi_awaddr;
+                        reg_axi_awaddr_4 <= reg_axi_awaddr_4;
                     end
                 end
+                // 预读取设置
+                if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
+                    read_flag_4 <= 1'b1;
+                    if(read_flag_4 == 1'b0) pre_rd_en_4 <= 1'b1;
+                    else pre_rd_en_4 <= 1'b0;
+                end
                 else begin
-                    reg_axi_awaddr_4 <= 'b0;
-                    reg_axi_awaddr <= 'b0;
+                    read_flag_4 <= read_flag_4;                 // 上电后变化一次后，不再变化        
+                end 
+            end
+            CH4_DATA: begin
+                if(pre_rd_en_4) begin
+                    pre_rd_en_4 <= 1'b0;
                 end
             end
-            CH_4: begin
-                if(addr_head_flag) begin
-                    channel4_addr <= channel4_addr + 1'b1;
-                    channel4_data_d1 <= channel4_data;
-                end
-                else if((axi_wvalid == 1'b1) && (axi_wready == 1'b1) && (burst_len_count < BURST_LEN - 1'b1)) begin
-                    channel4_addr <= channel4_addr + 1'b1;
+            CH5_ADDR: begin
+                // 握手设置
+                if(axi_awready) begin
+                    awvalid_temp <= 1'b0;
+                    reg_axi_awvalid <= 1'b0;
                 end
                 else begin
-                    channel4_addr <= channel4_addr;
+                    awvalid_temp <= 1'b1;
+                    reg_axi_awvalid <= awvalid_temp;
                 end
-                if(frame_end_flag_4) begin 
-                    reg_axi_awaddr_4 <= 'b0;                    // 指示帧结束信号来临时，用于累加的地址信号必须清零
-                    if(frame_addr_count_4 == 2'd1) begin        // 每帧结束地址偏移计数信号
-                        frame_addr_count_4 <= 2'b0;
-                    end
-                    else begin
-                        frame_addr_count_4 <= frame_addr_count_4 + 1'b1;
-                    end
-                end
-                else begin
-                    reg_axi_awaddr_4 <= reg_axi_awaddr_4;
-                    frame_addr_count_4 <= frame_addr_count_4;
-                end
-            end
-            CH5_WAIT: begin
-                if(frame_addr_count_5 == 2'd0) begin
-                    if((channel4_rvalid == 1'b1) && (channel5_rready == 1'b1)) begin
-                        reg_axi_awaddr <= ADDR_OFFSET_5 + reg_axi_awaddr_5;         // 没握手之前生成首地址
+                // 地址设置
+                if(frame_count_5 == 2'd1) begin                         // 帧 1 使用基地址 1
+                    if(pose_awvalid) begin                              // 没握手之前生成首地址
+                        reg_axi_awaddr <= ADDR_OFFSET_5 + reg_axi_awaddr_5;
                     end
                     else if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
                         reg_axi_awaddr_5 <= reg_axi_awaddr_5 + ADDR_STEP;
                     end
                     else begin
-                        reg_axi_awaddr_5 <= reg_axi_awaddr_5;
                         reg_axi_awaddr <= reg_axi_awaddr;
+                        reg_axi_awaddr_5 <= reg_axi_awaddr_5;
                     end
                 end
-                else if(frame_addr_count_5 == 2'd1) begin
-                    if((channel5_rvalid == 1'b1) && (channel5_rready == 1'b1)) begin
+                else if(frame_count_5 == 2'd2) begin                    // 帧 2 使用基地址 2
+                    if(pose_awvalid) begin                              // 没握手之前生成首地址
                         reg_axi_awaddr <= ADDR_OFFSET_5 + FRAME_ADDR_OFFSET_2 + reg_axi_awaddr_5;
                     end
                     else if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
                         reg_axi_awaddr_5 <= reg_axi_awaddr_5 + ADDR_STEP;
                     end
                     else begin
-                        reg_axi_awaddr_5 <= reg_axi_awaddr_5;
                         reg_axi_awaddr <= reg_axi_awaddr;
+                        reg_axi_awaddr_5 <= reg_axi_awaddr_5;
                     end
                 end
-                else begin
-                    reg_axi_awaddr_5 <= 'b0;
-                    reg_axi_awaddr <= 'b0;
-                end
-            end
-            CH_5: begin
-                if(addr_head_flag) begin
-                    channel5_addr <= channel5_addr + 1'b1;
-                    channel5_data_d1 <= channel5_data;
-                end
-                else if((axi_wvalid == 1'b1) && (axi_wready == 1'b1) && (burst_len_count < BURST_LEN - 1'b1)) begin
-                    channel5_addr <= channel5_addr + 1'b1;
+                // 预读取设置
+                if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
+                    read_flag_5 <= 1'b1;
+                    if(read_flag_5 == 1'b0) pre_rd_en_5 <= 1'b1;
+                    else pre_rd_en_5 <= 1'b0;
                 end
                 else begin
-                    channel5_addr <= channel5_addr;
-                end
-                if(frame_end_flag_5) begin 
-                    reg_axi_awaddr_5 <= 'b0;                    // 指示帧结束信号来临时，用于累加的地址信号必须清零
-                    if(frame_addr_count_5 == 2'd1) begin        // 每帧结束地址偏移计数信号
-                        frame_addr_count_5 <= 2'b0;
-                    end
-                    else begin
-                        frame_addr_count_5 <= frame_addr_count_5 + 1'b1;
-                    end
-                end
-                else begin
-                    reg_axi_awaddr_5 <= reg_axi_awaddr_5;
-                    frame_addr_count_5 <= frame_addr_count_5;
-                end
+                    read_flag_5 <= read_flag_5;                 // 上电后变化一次后，不再变化        
+                end 
             end
             default: begin
-                channel1_addr <= channel1_addr;
-                channel2_addr <= channel2_addr;
-                channel3_addr <= channel3_addr;
-                channel4_addr <= channel4_addr;
-                channel5_addr <= channel5_addr;
-                frame_addr_count_1 <= frame_addr_count_1;
-                frame_addr_count_2 <= frame_addr_count_2;
-                frame_addr_count_3 <= frame_addr_count_3;
-                frame_addr_count_4 <= frame_addr_count_4;
-                frame_addr_count_5 <= frame_addr_count_5;
+                awvalid_temp <= awvalid_temp;
+                reg_axi_awvalid <= reg_axi_awvalid;
                 reg_axi_awaddr_1 <= reg_axi_awaddr_1;
                 reg_axi_awaddr_2 <= reg_axi_awaddr_2;
                 reg_axi_awaddr_3 <= reg_axi_awaddr_3;
                 reg_axi_awaddr_4 <= reg_axi_awaddr_4;
                 reg_axi_awaddr_5 <= reg_axi_awaddr_5;
                 reg_axi_awaddr <= reg_axi_awaddr;
-                channel1_data_d1 <= 'b0;
-                channel2_data_d1 <= 'b0;
-                channel3_data_d1 <= 'b0;
-                channel4_data_d1 <= 'b0;
-                channel5_data_d1 <= 'b0;
+                read_flag_1 <= read_flag_1;
+                read_flag_2 <= read_flag_2;
+                read_flag_3 <= read_flag_3;
+                read_flag_4 <= read_flag_4;
+                read_flag_5 <= read_flag_5;
+                pre_rd_en_1 <= pre_rd_en_1;
+                pre_rd_en_2 <= pre_rd_en_2;
+                pre_rd_en_3 <= pre_rd_en_3;
+                pre_rd_en_4 <= pre_rd_en_4;
+                pre_rd_en_5 <= pre_rd_en_5;
             end
         endcase
     end
-end
+end 
 
 
-// 数据通道
+// 状态机内的数据信号，不使用时序逻辑实现以避免延迟
 always @(*) begin
     case(buf_rd_state)
-        CH_1: reg_axi_wdata <= pose_axi_wready ? channel1_data_d1 : channel1_data;
-        CH_2: reg_axi_wdata <= pose_axi_wready ? channel2_data_d1 : channel2_data;
-        CH_3: reg_axi_wdata <= pose_axi_wready ? channel3_data_d1 : channel3_data;
-        CH_4: reg_axi_wdata <= pose_axi_wready ? channel4_data_d1 : channel4_data;
-        CH_5: reg_axi_wdata <= pose_axi_wready ? channel5_data_d1 : channel5_data;
-        default: reg_axi_wdata <= 'b0;
+        CH1_DATA: begin
+            channel1_rd_en <= (pre_rd_en_1) ? 1'b1 : axi_wready;
+            reg_axi_wdata <= channel1_data;
+        end
+        CH2_DATA: begin
+            channel2_rd_en <= (pre_rd_en_2) ? 1'b1 : axi_wready;
+            reg_axi_wdata <= channel2_data;
+        end
+        CH3_DATA: begin
+            channel3_rd_en <= (pre_rd_en_3) ? 1'b1 : axi_wready;
+            reg_axi_wdata <= channel3_data;
+        end
+        CH4_DATA: begin
+            channel4_rd_en <= (pre_rd_en_4) ? 1'b1 : axi_wready;
+            reg_axi_wdata <= channel4_data;
+        end
+        CH5_DATA: begin
+            channel5_rd_en <= (pre_rd_en_5) ? 1'b1 : axi_wready;
+            reg_axi_wdata <= channel5_data;
+        end
+        default:begin
+            channel1_rd_en <= 1'b0;
+            channel2_rd_en <= 1'b0;
+            channel3_rd_en <= 1'b0;
+            channel4_rd_en <= 1'b0;
+            channel5_rd_en <= 1'b0;
+            reg_axi_wdata <= 'd0;
+        end
     endcase
 end
-
-
-// 初始化完成信号，用于指示 hdmi 时序生成模块完成复位
-always @(posedge clk or negedge rst) begin
-    if(!rst) begin
-        init_done <= 'b0;
-    end
-    else if(frame_end_flag_4)begin
-        init_done <= 1'b1;
-    end
-    else begin
-        init_done <= init_done;
-    end
-end
-                                                                                                                                                                            
 
 endmodule

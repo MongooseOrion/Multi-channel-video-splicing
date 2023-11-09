@@ -55,9 +55,11 @@ parameter HEIGHT_TC = (H_HEIGHT / 4) * 3;
 wire [15:0]             rd_data         ;
 wire                    pose_href       ;
 wire                    pose_vsync      ;
+wire                    nege_href       ;
 wire                    rd_en           ;
 
 reg                     vsync_d1        ;
+reg [1:0]               frame_count     ;
 reg                     href_d1         ;
 reg [10:0]              pix_count       ;
 reg [9:0]               row_count       ;
@@ -76,7 +78,7 @@ assign pose_vsync = ((hdmi_vsync) && (~vsync_d1)) ? 1'b1 : 1'b0;
 assign rd_en = hdmi_href;
 
 // 对行场同步信号延时
-always @(posedge clk or negedge rst) begin
+always @(posedge rd_clk or negedge rst) begin
     if(!rst) begin
         vsync_d1 <= 'b0;
         href_d1 <= 'b0;
@@ -86,6 +88,25 @@ always @(posedge clk or negedge rst) begin
         href_d1 <= hdmi_href;
     end
 end
+
+
+// 场同步计数
+/*always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        frame_count <= 'b0;
+    end
+    else if(pose_vsync) begin
+        if(frame_count == 'd2) begin
+            frame_count <= 'b1;
+        end
+        else begin
+            frame_count <= frame_count + 1'b1;
+        end
+    end
+    else begin
+        frame_count <= frame_count;
+    end
+end*/
 
 
 // 输入的像素数计数（只计一行）
