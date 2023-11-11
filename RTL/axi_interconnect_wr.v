@@ -23,7 +23,7 @@
 * FILE ENCODER TYPE: GBK
 * ========================================================================
 */
-// 将 buf 数据通过 axi 写入 ddr（基于乱序和 outstanding）
+// 将 buf 数据通过 axi 写入 ddr（可基于乱序和 outstanding）
 //
 module axi_interconnect_wr #(
     parameter MEM_ROW_WIDTH        = 15     ,
@@ -122,11 +122,11 @@ parameter HEIGHT_QD = H_HEIGHT / 4;
 parameter WIDTH_TC = H_WIDTH * 3/4;
 parameter HEIGHT_TC = H_HEIGHT * 3/4;
 
-wire                            vs_1;
-wire                            vs_2;
-wire                            vs_3;
-wire                            vs_4;
-wire                            vs_5;
+wire                            pose_vs_1;
+wire                            pose_vs_2;
+wire                            pose_vs_3;
+wire                            pose_vs_4;
+wire                            pose_vs_5;
 wire                            pose_awvalid;
 
 reg [CTRL_ADDR_WIDTH-1:0]       reg_axi_awaddr  ;
@@ -372,11 +372,11 @@ always @(posedge clk or negedge rst) begin
     end
 end
 
-assign vs_1 = ((channel1_vs) && (~channel1_vs_d1)) ? 1'b1 : 1'b0;
-assign vs_2 = ((channel2_vs) && (~channel2_vs_d1)) ? 1'b1 : 1'b0;
-assign vs_3 = ((channel3_vs) && (~channel3_vs_d1)) ? 1'b1 : 1'b0;
-assign vs_4 = ((channel4_vs) && (~channel4_vs_d1)) ? 1'b1 : 1'b0;
-assign vs_5 = ((channel5_vs) && (~channel5_vs_d1)) ? 1'b1 : 1'b0;
+assign pose_vs_1 = ((channel1_vs) && (~channel1_vs_d1)) ? 1'b1 : 1'b0;
+assign pose_vs_2 = ((channel2_vs) && (~channel2_vs_d1)) ? 1'b1 : 1'b0;
+assign pose_vs_3 = ((channel3_vs) && (~channel3_vs_d1)) ? 1'b1 : 1'b0;
+assign pose_vs_4 = ((channel4_vs) && (~channel4_vs_d1)) ? 1'b1 : 1'b0;
+assign pose_vs_5 = ((channel5_vs) && (~channel5_vs_d1)) ? 1'b1 : 1'b0;
 
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
@@ -387,7 +387,7 @@ always @(posedge clk or negedge rst) begin
         frame_count_5 <= 'b0;
     end
     else begin
-        if(vs_1) begin
+        if(pose_vs_1) begin
             if(frame_count_1 == 2'd2) begin
                 frame_count_1 <= 2'd1;
             end
@@ -398,7 +398,7 @@ always @(posedge clk or negedge rst) begin
         else begin
             frame_count_1 <= frame_count_1;
         end
-        if(vs_2) begin
+        if(pose_vs_2) begin
             if(frame_count_2 == 2'd2) begin
                 frame_count_2 <= 2'd1;
             end
@@ -409,7 +409,7 @@ always @(posedge clk or negedge rst) begin
         else begin
             frame_count_2 <= frame_count_2;
         end
-        if(vs_3) begin
+        if(pose_vs_3) begin
             if(frame_count_3 == 2'd2) begin
                 frame_count_3 <= 2'd1;
             end
@@ -420,7 +420,7 @@ always @(posedge clk or negedge rst) begin
         else begin
             frame_count_3 <= frame_count_3;
         end
-        if(vs_4) begin
+        if(pose_vs_4) begin
             if(frame_count_4 == 2'd2) begin
                 frame_count_4 <= 2'd1;
             end
@@ -431,7 +431,7 @@ always @(posedge clk or negedge rst) begin
         else begin
             frame_count_4 <= frame_count_4;
         end
-        if(vs_5) begin
+        if(pose_vs_5) begin
             if(frame_count_5 == 2'd2) begin
                 frame_count_5 <= 2'd1;
             end
@@ -468,20 +468,25 @@ always @(posedge clk or negedge rst) begin
         pre_rd_en_4 <= 'b0;
         pre_rd_en_5 <= 'b0;
     end
-    else if(vs_1) begin
+    else if(pose_vs_1) begin
         reg_axi_awaddr_1 <= 'b0;
+        read_flag_1 <= 'b0;
     end
-    else if(vs_2) begin
+    else if(pose_vs_2) begin
         reg_axi_awaddr_2 <= 'b0;
+        read_flag_2 <= 'b0;
     end
-    else if(vs_3) begin
+    else if(pose_vs_3) begin
         reg_axi_awaddr_3 <= 'b0;
+        read_flag_3 <= 'b0;
     end
-    else if(vs_4) begin
+    else if(pose_vs_4) begin
         reg_axi_awaddr_4 <= 'b0;
+        read_flag_4 <= 'b0;
     end
-    else if(vs_5) begin
+    else if(pose_vs_5) begin
         reg_axi_awaddr_5 <= 'b0;
+        read_flag_5 <= 'b0;
     end
     else begin
         case(buf_rd_state)

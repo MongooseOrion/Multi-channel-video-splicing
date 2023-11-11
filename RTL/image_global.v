@@ -34,7 +34,8 @@ module image_global#(
     parameter M_ADDR_WIDTH      = 5'd5             // buf 读通道位宽
 )(
     input               ddr_clk                     ,
-    input               rst                         ,
+    input               sys_rst                     ,
+    input               ddr_init                    ,
     input       [3:0]   ctrl_command_in             ,
     input       [3:0]   value_command_in            ,
     
@@ -102,41 +103,26 @@ parameter   CAM_1 = 4'b0001,
             CAM_FUSION = 4'b0011,
             HDMI = 4'b0100;
 
-wire [M_ADDR_WIDTH-1'b1:0]      channel1_addr       ;
-wire                            channel1_rvalid     /* synthesis syn_keep = 1 */;
 wire                            channel1_rd_en      ;
 wire                            channel1_rready     /* synthesis syn_keep = 1 */;
 wire [MEM_DQ_WIDTH*8-1'b1:0]    channel1_data       ;
-wire                            frame_end_flag_1    ;
-wire [M_ADDR_WIDTH-1'b1:0]      channel2_addr       ;
-wire                            channel2_rvalid     /* synthesis syn_keep = 1 */;
 wire                            channel2_rd_en      ;
 wire                            channel2_rready     /* synthesis syn_keep = 1 */;
 wire [MEM_DQ_WIDTH*8-1'b1:0]    channel2_data       ;
-wire                            frame_end_flag_2    ;
-wire [M_ADDR_WIDTH-1'b1:0]      channel3_addr       ;
-wire                            channel3_rvalid     ;
 wire                            channel3_rd_en      ;
 wire                            channel3_rready     ;
 wire [MEM_DQ_WIDTH*8-1'b1:0]    channel3_data       ;
-wire                            frame_end_flag_3    ;
-wire [M_ADDR_WIDTH-1'b1:0]      channel4_addr       ;
-wire                            channel4_rvalid     /* synthesis syn_keep = 1 */;
 wire                            channel4_rd_en      ;
 wire                            channel4_rready     /* synthesis syn_keep = 1 */;
 wire [MEM_DQ_WIDTH*8-1'b1:0]    channel4_data       ;
-wire                            frame_end_flag_4    ;
-wire [M_ADDR_WIDTH-1'b1:0]      channel5_addr       ;
-wire                            channel5_rvalid     ;
 wire                            channel5_rd_en      ;
 wire                            channel5_rready     ;
 wire [MEM_DQ_WIDTH*8-1'b1:0]    channel5_data       ;
-wire                            frame_end_flag_5    ;
-wire                            axi_wr_buf_wait     ;
-wire                            axi_rd_en           ;
-wire [1:0]                      channel_sel         ;
 wire                            buf_wr_en           ;
 wire [MEM_DQ_WIDTH*8-1'b1:0]    buf_wr_data         ;
+wire                            init_tc_done        ;
+wire                            init_qd_done        ;
+//wire                            
 
 reg [3:0]   reg_value_command   ;
 reg         ultimate_clk_in     ;
@@ -150,18 +136,16 @@ video_sampling #(
     .IMAGE_TAG          (4'd1),
     .SEL_MODE           (2'd1)
 )video_sampling_cmos1 (
-    .clk                (cmos1_pclk),
-    .rst                (1'b1),
-    .de_in              (cmos1_href),
-    .vs_in              (cmos1_vsync),
-    .rgb565_in          (cmos1_pix_data),
-    .rd_addr            (channel1_addr   ),
-    .rd_clk             (ddr_clk    ),
-    .rd_valid           (channel1_rvalid ),
-    .rd_en              (channel1_rd_en  ),
-    .data_out_ready     (channel1_rready ),
-    .rd_data            (channel1_data   ),
-    .frame_end_flag     (frame_end_flag_1),
+    .clk                (cmos1_pclk         ),
+    .rst                (sys_rst            ),
+    .de_in              (cmos1_href         ),
+    .vs_in              (cmos1_vsync        ),
+    .rgb565_in          (cmos1_pix_data     ),
+    .rd_clk             (ddr_clk            ),
+    .rd_en              (channel1_rd_en     ),
+    .data_out_ready     (channel1_rready    ),
+    .rd_data            (channel1_data      ),
+    .burst_emergency    (),
     .trans_id           ()
 );
 
@@ -171,18 +155,16 @@ video_sampling #(
     .IMAGE_TAG          (4'd2),
     .SEL_MODE           (2'd1)
 )video_sampling_cmos2 (
-    .clk                (cmos2_pclk),
-    .rst                (1'b1),
-    .de_in              (cmos2_href),
-    .vs_in              (cmos2_vsync),
-    .rgb565_in          (cmos2_pix_data),
-    .rd_addr            (channel2_addr   ),
-    .rd_clk             (ddr_clk    ),
-    .rd_valid           (channel2_rvalid ),
-    .rd_en              (channel2_rd_en  ),
-    .data_out_ready     (channel2_rready ),
-    .rd_data            (channel2_data   ),
-    .frame_end_flag     (frame_end_flag_2),
+    .clk                (cmos2_pclk         ),
+    .rst                (sys_rst            ),
+    .de_in              (cmos2_href         ),
+    .vs_in              (cmos2_vsync        ),
+    .rgb565_in          (cmos2_pix_data     ),
+    .rd_clk             (ddr_clk            ),
+    .rd_en              (channel2_rd_en     ),
+    .data_out_ready     (channel2_rready    ),
+    .rd_data            (channel2_data      ),
+    .burst_emergency    (),
     .trans_id           ()
 );
 
@@ -192,18 +174,16 @@ video_sampling #(
     .IMAGE_TAG          (4'd3),
     .SEL_MODE           (2'd1)
 )video_sampling_cmos_fusion (
-    .clk                (cmos_fusion_pclk),
-    .rst                (1'b1),
-    .de_in              (cmos_fusion_href),
-    .vs_in              (cmos_fusion_vsync),
-    .rgb565_in          (cmos_fusion_data),
-    .rd_addr            (channel3_addr   ),
-    .rd_clk             (ddr_clk    ),
-    .rd_valid           (channel3_rvalid ),
-    .rd_en              (channel3_rd_en   ),
-    .data_out_ready     (channel3_rready ),
-    .rd_data            (channel3_data   ),
-    .frame_end_flag     (frame_end_flag_3),
+    .clk                (cmos_fusion_pclk   ),
+    .rst                (sys_rst            ),
+    .de_in              (cmos_fusion_href   ),
+    .vs_in              (cmos_fusion_vsync  ),
+    .rgb565_in          (cmos_fusion_data   ),
+    .rd_clk             (ddr_clk            ),
+    .rd_en              (channel3_rd_en     ),
+    .data_out_ready     (channel3_rready    ),
+    .rd_data            (channel3_data      ),
+    .burst_emergency    (),
     .trans_id           ()
 );
 
@@ -213,18 +193,16 @@ video_sampling #(
     .IMAGE_TAG          (4'd4),
     .SEL_MODE           (2'd1)
 )video_sampling_hdmi (
-    .clk                (hdmi_pclk),
-    .rst                (1'b1),
-    .de_in              (hdmi_href),
-    .vs_in              (hdmi_vsync),
-    .rgb565_in          (hdmi_pix_data),
-    .rd_addr            (channel4_addr   ),
-    .rd_clk             (ddr_clk    ),
-    .rd_valid           (channel4_rvalid ),
-    .rd_en              (channel4_rd_en  ),
-    .data_out_ready     (channel4_rready ),
-    .rd_data            (channel4_data   ),
-    .frame_end_flag     (frame_end_flag_4),
+    .clk                (hdmi_pclk          ),
+    .rst                (sys_rst            ),
+    .de_in              (hdmi_href          ),
+    .vs_in              (hdmi_vsync         ),
+    .rgb565_in          (hdmi_pix_data      ),
+    .rd_clk             (ddr_clk            ),
+    .rd_en              (channel4_rd_en     ),
+    .data_out_ready     (channel4_rready    ),
+    .rd_data            (channel4_data      ),
+    .burst_emergency    (),
     .trans_id           ()
 );
 
@@ -284,63 +262,56 @@ video_sampling #(
     .IMAGE_TAG          (4'd5),
     .SEL_MODE           (2'd2)
 )video_sampling_ultimate (
-    .clk                (ultimate_clk_in),
-    .rst                (1'b1),
-    .vs_in              (ultimate_vs_in),
-    .de_in              (ultimate_de_in),
-    .rgb565_in          (ultimate_data_in),
-    .rd_clk             (ddr_clk     ),
-    .rd_addr            (channel5_addr    ),
-    .rd_valid           (channel5_rvalid  ),
-    .rd_en              (channel5_rd_en   ),
-    .data_out_ready     (channel5_rready  ),
-    .rd_data            (channel5_data    ),
-    .frame_end_flag     (frame_end_flag_5 ),
+    .clk                (ultimate_clk_in    ),
+    .rst                (sys_rst            ),
+    .vs_in              (ultimate_vs_in     ),
+    .de_in              (ultimate_de_in     ),
+    .rgb565_in          (ultimate_data_in   ),
+    .rd_clk             (ddr_clk            ),
+    .rd_en              (channel5_rd_en     ),
+    .data_out_ready     (channel5_rready    ),
+    .rd_data            (channel5_data      ),
+    .burst_emergency    (),
     .trans_id           ()
 );
 
 
 // 上述内容循环仲裁从 AXI 写入 DDR
 axi_interconnect_wr u_axi_interconnect_wr(
-    .clk                            (ddr_clk),
-    .rst                            (rst),
+    .clk                            (ddr_clk            ),
+    .rst                            (ddr_init           ),
 
-    .channel1_addr                  (channel1_addr   ),
-    .channel1_rvalid                (channel1_rvalid ),
-    .channel1_rd_en                 (channel1_rd_en  ),
-    .channel1_rready                (channel1_rready ),
-    .channel1_data                  (channel1_data   ),
-    .frame_end_flag_1               (frame_end_flag_1),
+    .channel1_vsync                 (cmos1_vsync        ),
+    .channel1_rready                (channel1_rready    ),
+    .channel1_rd_en                 (channel1_rd_en     ),
+    .channel1_data                  (channel1_data      ),
 
-    .channel2_addr                  (channel2_addr   ),
-    .channel2_rvalid                (channel2_rvalid ),
-    .channel2_rd_en                 (channel2_rd_en  ),
-    .channel2_rready                (channel2_rready ),
-    .channel2_data                  (channel2_data   ),
-    .frame_end_flag_2               (frame_end_flag_2),
+    .channel2_vsync                 (cmos2_vsync        ),
+    .channel2_rready                (channel2_rready    ),
+    .channel2_rd_en                 (channel2_rd_en     ),
+    .channel2_data                  (channel2_data      ),
 
-    .channel3_addr                  (channel3_addr   ),
-    .channel3_rvalid                (channel3_rvalid ),
-    .channel3_rd_en                 (channel3_rd_en  ),
-    .channel3_rready                (channel3_rready ),
-    .channel3_data                  (channel3_data   ),
-    .frame_end_flag_3               (frame_end_flag_3),
+    .channel3_vsync                 (cmos_fusion_vsync  ),
+    .channel3_rready                (channel3_rready    ),
+    .channel3_rd_en                 (channel3_rd_en     ),
+    .channel3_data                  (channel3_data      ),
 
-    .channel4_addr                  (channel4_addr   ),
-    .channel4_rvalid                (channel4_rvalid ),
-    .channel4_rd_en                 (channel4_rd_en  ),
-    .channel4_rready                (channel4_rready ),
-    .channel4_data                  (channel4_data   ),
-    .frame_end_flag_4               (frame_end_flag_4),
+    .channel4_vsync                 (hdmi_vsync     ),
+    .channel4_rready                (channel4_rready    ),
+    .channel4_rd_en                 (channel4_rd_en     ),
+    .channel4_data                  (channel4_data      ),
 
-    .channel5_addr                  (channel5_addr   ),
-    .channel5_rvalid                (channel5_rvalid ),
-    .channel5_rd_en                 (channel5_rd_en  ),
-    .channel5_rready                (channel5_rready ),
-    .channel5_data                  (channel5_data   ),
-    .frame_end_flag_5               (frame_end_flag_5),
+    .channel5_vsync                 (ultimate_vs_in     ),
+    .channel5_rready                (channel5_rready    ),
+    .channel5_rd_en                 (channel5_rd_en     ),
+    .channel5_data                  (channel5_data      ),
 
-    .init_done                      (init_done),
+    .processing_wait                (image_process_wait ),
+    .wait_proceed                   (wait_proceed       ),
+    
+    .init_qd_done                   (init_qd_done       ),
+    .init_tc_done                   (init_tc_done       ),
+    .init_done                      (init_done          ),
 
     .axi_awaddr                     (axi_awaddr  ),
     .axi_awid                       (axi_awid    ),
@@ -362,10 +333,9 @@ axi_interconnect_wr u_axi_interconnect_wr(
 
 // 从 DDR 读出给 buffer，以便 HDMI 显示
 axi_interconnect_rd u_axi_interconnect_rd(
-    .clk                        (ddr_clk),
-    .rst                        (rst),
-    .init_done                  (init_done),
-    .axi_wr_buf_wait            ( ),
+    .clk                        (ddr_clk        ),
+    .rst                        (ddr_init       ),
+    .init_tc_done               (init_tc_done   ),
     .channel_sel                (channel_sel     ),
     .buf_wr_en                  (buf_wr_en       ),
     .buf_wr_data                (buf_wr_data     ),
@@ -389,19 +359,7 @@ axi_interconnect_rd u_axi_interconnect_rd(
 
 // 输出数据缓存 buf
 ddr_rd_buf u_ddr_rd_buf(
-    .clk                        (ddr_clk),
-    .rst                        (rst),
-    .buf_wr_en                  (buf_wr_en   ),
-    .buf_wr_data                (buf_wr_data ),
-    .channel_sel                (channel_sel ),
-    .axi_wr_buf_wait            (),
-
-    .hdmi_href                  (vesa_out_de),
-    .hdmi_vsync                 (vesa_out_vsync),
-    .rd_clk                     (vesa_out_clk),
-    .rd_rst                     (rst),
-    .de_o                       (de_out),
-    .rgb565_out                 (vesa_out_data)
+    
 );
 
 endmodule

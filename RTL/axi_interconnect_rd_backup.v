@@ -102,7 +102,9 @@ reg                             reg_axi_rready  ;
 reg [DQ_WIDTH*8-1:0]            reg_axi_rdata   ;
 
 reg                             reg_vsync_d1    ;
+reg                             reg_vsync_d2    ;
 reg                             reg_href_d1     ;
+reg                             reg_href_d2     ;
 reg                             row_end_flag_1  ;
 reg                             row_end_flag_2  ;
 reg                             axi_rd_en       ;
@@ -133,20 +135,24 @@ assign axi_rready   = 1'b1                  ;
 
 assign buf_wr_en    = ((axi_rvalid == 1'b1) && (axi_rready == 1'b1)) ? 1'b1 : 1'b0;
 assign buf_wr_data  = axi_rdata;
-assign pose_vsync = ((hdmi_vsync) && (~reg_vsync_d1)) ? 1'b1 : 1'b0;
-assign nege_vsync = ((~hdmi_vsync) && (reg_vsync_d1)) ? 1'b1 : 1'b0;
-assign nege_href = ((~hdmi_href) && (reg_href_d1)) ? 1'b1 : 1'b0;
+assign pose_vsync = ((reg_vsync_d1) && (~reg_vsync_d2)) ? 1'b1 : 1'b0;
+assign nege_vsync = ((~reg_vsync_d1) && (reg_vsync_d2)) ? 1'b1 : 1'b0;
+assign nege_href = ((~reg_href_d1) && (reg_href_d2)) ? 1'b1 : 1'b0;
 
 
-// 延迟时钟周期
+// 延迟时钟周期，跨时钟信号应延迟两个周期，确保基于它们创建的任何信号符合时序要求
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
         reg_vsync_d1 <= 'b0;
+        reg_vsync_d2 <= 'b0;
         reg_href_d1 <= 'b0;
+        reg_href_d2 <= 'b0;
     end
     else begin
         reg_vsync_d1 <= hdmi_vsync;
+        reg_vsync_d2 <= reg_vsync_d1;
         reg_href_d1 <= hdmi_href;
+        reg_href_d2 <= reg_href_d1;
     end
 end
 
