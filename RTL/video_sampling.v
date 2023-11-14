@@ -37,8 +37,8 @@ module video_sampling#(
     input               clk,
     input               rst,
     // 信号输入
-    input               de_in       ,
-    input               vs_in       ,
+    input               de_in       /*synthesis PAP_MARK_DEBUG="1"*/ ,
+    input               vs_in        /*synthesis PAP_MARK_DEBUG="1"*/,
     input       [15:0]  rgb565_in   ,
     // 发往 DDR 存储
     input                                   rd_clk          ,
@@ -56,20 +56,64 @@ parameter HEIGHT_TC = (VIDEO_HEIGHT / 4) * 3;
 
 wire        pose_vs_in;
 wire        nege_vs_in;
-wire        wr_en_1;
-wire        wr_en_2;
+wire        wr_en_1/*synthesis PAP_MARK_DEBUG="1"*/;
+wire        wr_en_2/*synthesis PAP_MARK_DEBUG="1"*/;
 wire        almost_full;
 
 reg                             vs_in_d1        ; 
 reg                             de_in_d1        ; 
-reg [3:0]                       href_count      ; 
-reg [3:0]                       pix_count       ;
-reg                             wr_en_tr        ;     
+reg [3:0]                       href_count       /*synthesis PAP_MARK_DEBUG="1"*/; 
+reg [3:0]                       pix_count        /*synthesis PAP_MARK_DEBUG="1"*/;
+reg                             wr_en_tr       /*synthesis PAP_MARK_DEBUG="1"*/ ;     
 reg                             frame_valid     ;
 reg [15:0]                      wr_data_temp    ;
-reg [15:0]                      wr_data         ;
+reg [15:0]                      wr_data         /*synthesis PAP_MARK_DEBUG="1"*/;
+reg [10:0]                      row_count /*synthesis PAP_MARK_DEBUG="1"*/;
+reg [10:0]                      row_pix_count;
+reg                             pre_en /*synthesis PAP_MARK_DEBUG="1"*/;
 
-
+// 行计数
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        row_count <= 'b0;
+    end
+    else if(pose_vs_in) begin
+        row_count <= 'd0;
+    end
+    else if (nege_de_in) begin
+        row_count <= row_count + 1'b1;
+    end
+    else begin
+        row_count <= row_count;
+    end
+end
+// 写入有效的像素个数计数
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        row_pix_count <= 'b0;
+    end
+    else if(pose_vs_in) begin
+        row_pix_count <= 'd0;
+    end
+    else if (wr_en_tr == 1'b1 && row_pix_count < 'd30) begin
+        row_pix_count <= row_pix_count + 1'b1;
+    end
+    else if (row_pix_count >= 'd30)begin
+        row_pix_count <= row_pix_count;
+    end
+end
+//每帧图像预读一个256位的数据使能，在读时钟下
+always @(posedge rd_clk or negedge rst) begin
+    if(!rst) begin
+        pre_en <= 'b0;
+    end
+    else if (row_pix_count == 'd20) begin
+        pre_en <= 1'b1;
+    end
+    else begin
+        pre_en <= 1'b0;
+    end
+end
 // 帧有效信号，确保数据按帧顺序存储
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
@@ -82,6 +126,7 @@ end
 assign pose_vs_in = ((vs_in) && (~vs_in_d1)) ? 1'b1 : 1'b0;
 assign nege_vs_in = ((~vs_in) && (vs_in_d1)) ? 1'b1 : 1'b0;
 
+//assign data_out_ready = almost_full;
 
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
@@ -116,25 +161,25 @@ always @(posedge clk or negedge rst) begin
         href_count <= 'b0;
     end
     else if(frame_valid) begin
-        if((pose_de_in == 1'b1) && (href_count < 4'd4)) begin
+        if((nege_de_in == 1'b1) && (href_count < 4'd3)) begin
             href_count <= href_count + 1'b1;
         end
-        else if((pose_de_in == 1'b1) && (href_count == 4'd4)) begin
-            href_count <= 4'b1;
+        else if((nege_de_in == 1'b1) && (href_count == 4'd3)) begin
+            href_count <= 4'b0;
         end
         else begin
             href_count <= href_count;
         end
     end
     else begin
-        href_count <= 2'b0;
+        href_count <= 4'b0;
     end
 end
 
 
 // 满足行抽取要求的使能信号
 assign wr_en_1 = ((href_count == 4'd1) && (de_in_d1 == 1'b1)) ? 1'b1 : 1'b0;
-assign wr_en_2 = ((href_count < 4'd4) && (de_in_d1 == 1'b1)) ? 1'b1 : 1'b0;
+assign wr_en_2 = ((href_count < 4'd3) && (de_in_d1 == 1'b1)) ? 1'b1 : 1'b0;
 
 
 // 每四个像素丢三个像素数据，或者每四个丢一个
@@ -144,16 +189,19 @@ generate
             if(!rst) begin
                 pix_count <= 'b0;
             end
+            else if (pose_vs_in == 1'b1) begin
+                pix_count <= 'b0;
+            end
             else if(wr_en_1) begin
-                if(pix_count == 2'd3) begin
-                    pix_count <= 2'd0;
+                if(pix_count == 4'd3) begin
+                    pix_count <= 4'd0;
                 end
                 else begin
                     pix_count <= pix_count + 1'b1;
                 end
             end
             else begin
-                pix_count <= 2'b0;
+                pix_count <= 4'b0;
             end
         end
     end
@@ -162,16 +210,19 @@ generate
             if(!rst) begin
                 pix_count <= 'b0;
             end
+            else if (pose_vs_in == 1'b1) begin
+                pix_count <= 'b0;
+            end
             else if(wr_en_2) begin
-                if(pix_count == 2'd3) begin
-                    pix_count <= 2'd0;
+                if(pix_count == 4'd3) begin
+                    pix_count <= 4'd0;
                 end
                 else begin
                     pix_count <= pix_count + 1'b1;
                 end
             end
             else begin
-                pix_count <= 2'b0;
+                pix_count <= 4'b0;
             end
         end
     end
@@ -185,7 +236,7 @@ generate
             if(!rst) begin
                 wr_en_tr <= 'b0;
             end
-            else if((wr_en_1 == 1'b1) && (pix_count == 2'd0)) begin
+            else if((wr_en_1 == 1'b1) && (pix_count == 4'd0)) begin
                 wr_en_tr <= 1'b1;
             end
             else begin
@@ -225,31 +276,31 @@ end
 // 使用 fifo 存储满足两次突发长度的数据，almost_full 为标志信号
 fifo_wr_buf axi_wr_buf(
     .wr_clk         (clk),                // input
-    .wr_rst         (!rst),                // input
-    .wr_en          (wr_en_tr),                  // input
+    .wr_rst         (~rst|pose_vs_in),                // input
+    .wr_en          (wr_en_tr ),                  // input
     .wr_data        (wr_data),              // input [15:0]
     .wr_full        (burst_emergency),              // output
     .almost_full    (almost_full),      // output
     .rd_clk         (rd_clk),                // input
-    .rd_rst         (!rst),                // input
-    .rd_en          (rd_en),                  // input
+    .rd_rst         (~rst|pose_vs_in),                // input
+    .rd_en          (rd_en | pre_en),                  // input
     .rd_data        (rd_data),              // output [255:0]
     .rd_empty       (),            // output
     .almost_empty   ()     // output
 );
 
 
-// 数据准备好条件和信号 ID 
+ //数据准备好条件和信号 ID 
 always @(posedge rd_clk or negedge rst) begin
     if(!rst) begin
         data_out_ready <= 'b0;
         trans_id <= 'b0;
     end
-    else if((almost_full == 1'b1) && (rd_en == 1'b0)) begin
+    else if(almost_full == 1'b1) begin
         data_out_ready <= 1'b1;
         trans_id <= IMAGE_TAG;
     end
-    else if((almost_full == 1'b1) && (rd_en == 1'b1)) begin
+    else if(almost_full == 1'b0) begin
         data_out_ready <= 1'b0;
         trans_id <= 4'b0;
     end

@@ -23,23 +23,24 @@
 * FILE ENCODER TYPE: GBK
 * ========================================================================
 */
-// å¯¹ä¸‹ 3/4 é«˜åº¦ç”»é¢è¿›è¡Œæ“ä½œï¼Œå°†ç”»é¢ç¼©å°åˆ° 9/16
-// è¾“å…¥è§„æ ¼ï¼š1280x720
-module video_sampling_2 #(
+// ¶ÔÉÏ 1/4 ¸ß¶È»­Ãæ½øĞĞ²Ù×÷£¬½«»­ÃæËõĞ¡µ½ 1/16
+// ÊäÈë¹æ¸ñ£º1280x720
+module video_sampling_1 #(
     parameter WR_ADDR_LEN = 'd8, 
     parameter RD_ADDR_LEN = 'd5,
     parameter IMAGE_TAG = 4'd1,
     parameter DQ_WIDTH = 12'd32,
     parameter VIDEO_WIDTH = 'd1280,
-    parameter VIDEO_HEIGHT = 'd720
+    parameter VIDEO_HEIGHT = 'd720,
+    parameter SEL_MODE = 'd1            // 1:ËÄ³éÈı£¨1/16£©£¬2:ËÄ³éÒ»(9/16)
 )(
     input               clk,
     input               rst,
-    // ä¿¡å·è¾“å…¥
+    // ĞÅºÅÊäÈë
     input               de_in       /*synthesis PAP_MARK_DEBUG="1"*/ ,
     input               vs_in        /*synthesis PAP_MARK_DEBUG="1"*/,
     input       [15:0]  rgb565_in   ,
-    // å‘å¾€ DDR å­˜å‚¨
+    // ·¢Íù DDR ´æ´¢
     input                                   rd_clk          ,
     output      [DQ_WIDTH*8-1'b1:0]         rd_data         ,
     input                                   rd_en           ,
@@ -55,20 +56,40 @@ parameter HEIGHT_TC = (VIDEO_HEIGHT / 4) * 3;
 
 wire        pose_vs_in;
 wire        nege_vs_in;
-reg         wr_en_2;
+wire        wr_en_1/*synthesis PAP_MARK_DEBUG="1"*/;
+wire        wr_en_2/*synthesis PAP_MARK_DEBUG="1"*/;
 wire        almost_full;
 
 reg                             vs_in_d1        ; 
 reg                             de_in_d1        ; 
-reg [10:0]                       href_count       /*synthesis PAP_MARK_DEBUG="1"*/; 
+reg [3:0]                       href_count       /*synthesis PAP_MARK_DEBUG="1"*/; 
 reg [3:0]                       pix_count        /*synthesis PAP_MARK_DEBUG="1"*/;
 reg                             wr_en_tr       /*synthesis PAP_MARK_DEBUG="1"*/ ;     
+reg                             frame_valid     ;
 reg [15:0]                      wr_data_temp    ;
 reg [15:0]                      wr_data         /*synthesis PAP_MARK_DEBUG="1"*/;
+reg [10:0]                      row_count /*synthesis PAP_MARK_DEBUG="1"*/;
 reg [10:0]                      row_pix_count;
 reg                             pre_en /*synthesis PAP_MARK_DEBUG="1"*/;
 
-// å†™å…¥æœ‰æ•ˆçš„åƒç´ ä¸ªæ•°è®¡æ•°
+// ĞĞ¼ÆÊı
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        row_count <= 'b0;
+    end
+    else if(pose_vs_in) begin
+        row_count <= 'd0;
+    end
+    else if (nege_de_in) begin
+        row_count <= row_count + 1'b1;
+    end
+    else begin
+        row_count <= row_count;
+    end
+end
+
+
+// Ğ´ÈëÓĞĞ§µÄÏñËØ¸öÊı¼ÆÊı
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
         row_pix_count <= 'b0;
@@ -83,7 +104,9 @@ always @(posedge clk or negedge rst) begin
         row_pix_count <= row_pix_count;
     end
 end
-//æ¯å¸§å›¾åƒé¢„è¯»ä¸€ä¸ª256ä½çš„æ•°æ®ä½¿èƒ½ï¼Œåœ¨è¯»æ—¶é’Ÿä¸‹
+
+
+// Ã¿Ö¡Í¼ÏñÔ¤¶ÁÒ»¸ö256Î»µÄÊı¾İÊ¹ÄÜ£¬ÔÚ¶ÁÊ±ÖÓÏÂ
 always @(posedge rd_clk or negedge rst) begin
     if(!rst) begin
         pre_en <= 'b0;
@@ -95,7 +118,7 @@ always @(posedge rd_clk or negedge rst) begin
         pre_en <= 1'b0;
     end
 end
-// å¸§æœ‰æ•ˆä¿¡å·ï¼Œç¡®ä¿æ•°æ®æŒ‰å¸§é¡ºåºå­˜å‚¨
+// Ö¡ÓĞĞ§ĞÅºÅ£¬È·±£Êı¾İ°´Ö¡Ë³Ğò´æ´¢
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
         vs_in_d1 <= 'b0;
@@ -107,9 +130,25 @@ end
 assign pose_vs_in = ((vs_in) && (~vs_in_d1)) ? 1'b1 : 1'b0;
 assign nege_vs_in = ((~vs_in) && (vs_in_d1)) ? 1'b1 : 1'b0;
 
+//assign data_out_ready = almost_full;
+
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        frame_valid <= 'b0;
+    end
+    else if(nege_vs_in) begin
+        frame_valid <= 1'b1;
+    end
+    else if(pose_vs_in) begin
+        frame_valid <= 1'b0;
+    end
+    else begin
+        frame_valid <= frame_valid;
+    end
+end
 
 
-// è¡Œè®¡æ•°å’ŒæŠ½æ ·ï¼Œé—´éš” 3 è¡Œ
+// ĞĞ¼ÆÊıºÍ³éÑù£¬¼ä¸ô 3 ĞĞ
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
         de_in_d1 <= 'b0;
@@ -125,74 +164,107 @@ always @(posedge clk or negedge rst) begin
     if(!rst) begin
         href_count <= 'b0;
     end
-    else if (pose_vs_in == 1'b1) begin
-        href_count <= 'b0;
-    end 
-    else if(nege_de_in == 1'b1) begin
-        href_count <= href_count + 1'b1;
-    end
-    else begin
-        href_count <= href_count;
-    end
-end
-
-
-// æ»¡è¶³è¡ŒæŠ½å–è¦æ±‚çš„ä½¿èƒ½ä¿¡å·
-
-always @(posedge clk or negedge rst) begin
-    if(!rst) begin
-        wr_en_2 <= 'b0;
-    end
-    else if(href_count % 4 == 'd0)begin
-        wr_en_2 <= 1'b0;
-    end
-    else begin
-        wr_en_2 <= de_in;
-    end
-
-end
-
-// æ¯å››ä¸ªåƒç´ ä¸¢ä¸€ä¸ª
-always @(posedge clk or negedge rst) begin
-    if(!rst) begin
-        pix_count <= 'b0;
-    end
-    else if (pose_vs_in == 1'b1) begin
-        pix_count <= 'b0;
-    end
-    else if(wr_en_2) begin
-        if(pix_count == 4'd3) begin
-            pix_count <= 4'd0;
+    else if(frame_valid) begin
+        if((nege_de_in == 1'b1) && (href_count < 4'd3)) begin
+            href_count <= href_count + 1'b1;
+        end
+        else if((nege_de_in == 1'b1) && (href_count == 4'd3)) begin
+            href_count <= 4'b0;
         end
         else begin
-            pix_count <= pix_count + 1'b1;
+            href_count <= href_count;
         end
     end
     else begin
-        pix_count <= 4'b0;
-    end
-end
-    
-
-
-
-// æœ€ç»ˆçš„å†™ä½¿èƒ½ä¿¡å·
-
-always @(posedge clk or negedge rst) begin
-    if(!rst) begin
-        wr_en_tr <= 'b0;
-    end
-    else if((wr_en_2 == 1'b1) && (pix_count != 4'd3)) begin
-        wr_en_tr <= 1'b1;
-    end
-    else begin
-        wr_en_tr <= 1'b0;
+        href_count <= 4'b0;
     end
 end
 
 
+// Âú×ãĞĞ³éÈ¡ÒªÇóµÄÊ¹ÄÜĞÅºÅ
+assign wr_en_1 = ((href_count == 4'd1) && (de_in_d1 == 1'b1)) ? 1'b1 : 1'b0;
+assign wr_en_2 = ((href_count < 4'd3) && (de_in_d1 == 1'b1)) ? 1'b1 : 1'b0;
 
-// å†™æ•°æ®ä¿¡å·
+
+// Ã¿ËÄ¸öÏñËØ¶ªÈı¸öÏñËØÊı¾İ£¬»òÕßÃ¿ËÄ¸ö¶ªÒ»¸ö
+generate
+    if(SEL_MODE == 2'd1) begin
+        always @(posedge clk or negedge rst) begin
+            if(!rst) begin
+                pix_count <= 'b0;
+            end
+            else if (pose_vs_in == 1'b1) begin
+                pix_count <= 'b0;
+            end
+            else if(wr_en_1) begin
+                if(pix_count == 4'd3) begin
+                    pix_count <= 4'd0;
+                end
+                else begin
+                    pix_count <= pix_count + 1'b1;
+                end
+            end
+            else begin
+                pix_count <= 4'b0;
+            end
+        end
+    end
+    else if(SEL_MODE == 2'd2) begin
+        always @(posedge clk or negedge rst) begin
+            if(!rst) begin
+                pix_count <= 'b0;
+            end
+            else if (pose_vs_in == 1'b1) begin
+                pix_count <= 'b0;
+            end
+            else if(wr_en_2) begin
+                if(pix_count == 4'd3) begin
+                    pix_count <= 4'd0;
+                end
+                else begin
+                    pix_count <= pix_count + 1'b1;
+                end
+            end
+            else begin
+                pix_count <= 4'b0;
+            end
+        end
+    end
+endgenerate
+
+
+// ×îÖÕµÄĞ´Ê¹ÄÜĞÅºÅ
+generate
+    if(SEL_MODE == 2'd1) begin
+        always @(posedge clk or negedge rst) begin
+            if(!rst) begin
+                wr_en_tr <= 'b0;
+            end
+            else if((wr_en_1 == 1'b1) && (pix_count == 4'd0)) begin
+                wr_en_tr <= 1'b1;
+            end
+            else begin
+                wr_en_tr <= 1'b0;
+            end
+        end
+    end
+    else if(SEL_MODE == 2'd2) begin
+        always @(posedge clk or negedge rst) begin
+            if(!rst) begin
+                wr_en_tr <= 'b0;
+            end
+            else if((wr_en_2 == 1'b1) && (pix_count < 2'd3)) begin
+                wr_en_tr <= 1'b1;
+            end
+            else begin
+                wr_en_tr <= 1'b0;
+            end
+        end
+    end
+endgenerate
+
+
+// Ğ´Êı¾İĞÅºÅ
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
         wr_data_temp <= 'b0;
@@ -205,16 +277,16 @@ always @(posedge clk or negedge rst) begin
 end
 
 
-// ä½¿ç”¨ fifo å­˜å‚¨æ»¡è¶³ä¸¤æ¬¡çªå‘é•¿åº¦çš„æ•°æ®ï¼Œalmost_full ä¸ºæ ‡å¿—ä¿¡å·
+// Ê¹ÓÃ fifo ´æ´¢Âú×ãÁ½´ÎÍ»·¢³¤¶ÈµÄÊı¾İ£¬almost_full Îª±êÖ¾ĞÅºÅ
 fifo_wr_buf axi_wr_buf(
     .wr_clk         (clk),                // input
-    .wr_rst         (~rst|pose_vs_in),                // input
+    .wr_rst         ((~rst) || (pose_vs_in)),                // input
     .wr_en          (wr_en_tr ),                  // input
     .wr_data        (wr_data),              // input [15:0]
     .wr_full        (burst_emergency),              // output
     .almost_full    (almost_full),      // output
     .rd_clk         (rd_clk),                // input
-    .rd_rst         (~rst|pose_vs_in),                // input
+    .rd_rst         ((~rst) || (pose_vs_in)),                // input
     .rd_en          (rd_en | pre_en),                  // input
     .rd_data        (rd_data),              // output [255:0]
     .rd_empty       (),            // output
@@ -222,7 +294,7 @@ fifo_wr_buf axi_wr_buf(
 );
 
 
- //æ•°æ®å‡†å¤‡å¥½æ¡ä»¶å’Œä¿¡å· ID 
+ //Êı¾İ×¼±¸ºÃÌõ¼şºÍĞÅºÅ ID 
 always @(posedge rd_clk or negedge rst) begin
     if(!rst) begin
         data_out_ready <= 'b0;

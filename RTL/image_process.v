@@ -29,8 +29,8 @@
 module image_process #(
     parameter MEM_DATA_LEN = 'd64,
     parameter ADDR_LEN = 'd32,
-    parameter VIDEO_WIDTH =	'd1024,
-    parameter VIDEO_HEIGHT = 'd768,
+    parameter VIDEO_WIDTH =	'd960,
+    parameter VIDEO_HEIGHT = 'd540,
     parameter BURST_LEN = 'd1
 )(
     input 								rst,                  
@@ -38,6 +38,7 @@ module image_process #(
     input      	[2:0]          			key_out,
     input       [3:0]                   ctrl_command_in,   	// 控制信道
     input       [3:0]                   value_command_in,   // 数据通道
+    input                               frame_wr_done,
     // 读通道
     // 这是主设备
     output reg 							rd_valid,           // 读请求
@@ -55,22 +56,30 @@ module image_process #(
     input 								wr_burst_finish,    // 写完成
 
     output reg							image_addr_flag,
+    output                              frame_process_done,
+    output reg                          init_done,
     output reg	[4:0]					function_mode,
     output reg	[15:0]					display_number,
-    output reg	[10:0]   				color_threshold,          // 二值化阈值
     output reg 							error
 );
 
 // 读写操作状态机参数
 parameter   IDLE = 3'd0,
-            MEM_READ = 3'd1,
-            MEM_WRITE = 3'd2;
+            READY = 3'd1,
+            MEM_READ = 3'd2,
+            MEM_WRITE = 3'd3;
 // 显示功能模式状态机参数
 parameter   DEFAULT_MODE = 5'd0,
             ROTATE_MODE = 5'd1,
-            SHIFT_MODE_X = 5'd2,
-            SHIFT_MODE_Y = 5'd3,
+            X_SHIFT_MODE = 5'd2,
+            Y_SHIFT_MODE = 5'd3,
             SCALE_MODE = 5'd4;
+// 读写基地址
+parameter FRAME_ADDR = 'd260_000;
+parameter RD_BASE_ADDR_1 = 'd240_000;
+parameter RD_BASE_ADDR_2 = 'd240_000 + FRAME_ADDR;
+parameter WR_BASE_ADDR_1 = RD_BASE_ADDR_2 + FRAME_ADDR;
+parameter WR_BASE_ADDR_2 = WR_BASE_ADDR_1 + FRAME_ADDR;
 
 parameter IMAGE_SIZE = VIDEO_HEIGHT * VIDEO_WIDTH;
 
@@ -96,6 +105,8 @@ reg [3:0]	                scale_value;
 reg	[10:0]	                angle;
 reg	[31:0]	                wr_burst_addr_start;
 reg	[31:0]	                rd_burst_addr_start;
+reg                         image_addr_flag_d1;
+reg                         image_addr_flag_d2;
 
 assign wr_data = wr_data_reg;
 assign x_cnt = write_read_len[9:0];
@@ -108,7 +119,10 @@ always @(posedge clk or negedge rst) begin
         negative_value_command <= 'b0;
         positive_value_command <= 'b0;
     end
-    else if(ctrl_command_in) begin
+    else if((ctrl_command_in == 4'd2)
+            || (ctrl_command_in == 4'd3)
+            || (ctrl_command_in == 4'd4)
+            || (ctrl_command_in == 4'd5)) begin
         if(value_command_in[3] == 1'b0) begin
             positive_value_command <= value_command_in[2:0];
         end
@@ -123,96 +137,113 @@ always @(posedge clk or negedge rst) begin
 end
 
 
+// 指令控制的模式
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        function_mode <= 'b0;
+    end
+    else if(ctrl_command_in == 4'd2) begin
+        function_mode <= SCALE_MODE;
+    end
+    else if(ctrl_command_in == 4'd3) begin
+        function_mode <= ROTATE_MODE;
+    end
+    else if(ctrl_command_in == 4'd4) begin
+        function_mode <= X_SHIFT_MODE;
+    end
+    else if(ctrl_command_in == 4'd5) begin
+        function_mode <= Y_SHIFT_MODE;
+    end
+    else begin
+        function_mode <= function_mode;
+    end
+end
+
+
 // 缩放模式，缩放值的处理
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
         scale_value	<= 'b0;
     end
-    else if((scale_value == 4'b1) && (key_out[1])) begin
-        scale_value	<= 4'd6;
+    else if(function_mode == SCALE_MODE) begin	
+        if(value_command_in[3] == 1'b0) begin
+            scale_value <= scale_value + positive_value_command;
+        end
+        else if(value_command_in[3] == 1'b1) begin
+            scale_value <= scale_value - negative_value_command;
+        end
     end
-    else if((scale_value == 4'd6) && key_out[2])
-        scale_value	<=	1;
-    else if( function_mode != 4 )		
-        scale_value	<=	11'b1;
-    else if( key_out[2] && function_mode == 4)
-        scale_value	<=	scale_value	+ 11'd1;	
-    else if( key_out[1] && function_mode == 4)
-        scale_value	<=	scale_value	-	11'd1;
     else begin
-        scale_value <= 4'd1;
+        scale_value	<= 4'd1;
     end
 end
 
 
 // 旋转模式的角度调节
 always@(posedge clk or negedge rst) begin
-    if(!rst)
-        angle_temp	<=	9'b0;
-    else if( angle_temp == 0 && key_out[1] )
-        angle_temp	<=	360;
-    else if( angle_temp == 360 && key_out[2] )
-        angle_temp	<=	9'b0;
-    else if( function_mode != 1 )
-        angle_temp	<=	16'b0;
-    else if( key_out[2]  && function_mode == 1)
-        angle_temp	<=	angle_temp	+	16'd1;	
-    else if( key_out[1]  && function_mode == 1)
-        angle_temp	<=	angle_temp	-	16'd1;	
+    if(!rst) begin
+        angle_temp <= 'b0;
+    end
+    else if(function_mode == ROTATE_MODE) begin
+        if(value_command_in[3] == 1'b0) begin
+            angle_temp <= angle_temp + positive_value_command;
+        end
+        else if(value_command_in[3] == 1'b1) begin
+            angle_temp <= angle_temp - negative_value_command;
+        end
+    end
+    else begin
+        angle_temp <= 11'd0;
+    end	
 end
 
 
-// 
-always@(posedge clk or negedge rst)
-begin
-    if(!rst)
-        x_shift_cnt	<=	0;
-    else if( x_shift_cnt == 0 && key_out[1] )
-        x_shift_cnt	<=	VIDEO_WIDTH;
-    else if( x_shift_cnt == VIDEO_WIDTH && key_out[2] )
-        x_shift_cnt	<=	0;	
-    else if( function_mode != 2 )
-        x_shift_cnt	<=	11'b0;		
-    else if( key_out[2] && function_mode == 2 )
-        x_shift_cnt	<=	x_shift_cnt	+	11'd5;	
-    else if( key_out[1] && function_mode == 2 )
-        x_shift_cnt	<=	x_shift_cnt	-	11'd5;
-end
-
-
-// 
-always@(posedge clk or negedge rst)
-begin
-    if(!rst)
-        y_shift_cnt	<=	0;
-    else if( y_shift_cnt == 0 && key_out[1] )
-        y_shift_cnt	<=	VIDEO_HEIGHT;
-    else if( y_shift_cnt == VIDEO_HEIGHT && key_out[2] )
-        y_shift_cnt	<=	0;	
-    else if( function_mode != 3 )
-        y_shift_cnt	<=	11'b0;		
-    else if( key_out[2] && function_mode == 3 )
-        y_shift_cnt	<=	y_shift_cnt	+	11'd5;	
-    else if( key_out[1] && function_mode == 3 )
-        y_shift_cnt	<=	y_shift_cnt	-	11'd5;
-end
-
-
-// 
-always@(posedge clk or negedge rst)
-begin
-    if(!rst)
-        color_threshold	<=	10;
-    else if( color_threshold == 10 && key_out[1])
-        color_threshold	<=	250;
-    else if( color_threshold >= 250 && key_out[2])
-        color_threshold	<=	10;
-    else if( function_mode != 6 )		
-        color_threshold	<=	10;
-    else if( key_out[2] && function_mode == 6)
-        color_threshold	<=	color_threshold	+	11'd5;	
-    else if( key_out[1] && function_mode == 6)
-        color_threshold	<=	color_threshold	-	11'd5;
+// 平移模式
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        x_shift_cnt <= 'b0;
+        y_shift_cnt <= 'b0;
+    end
+    else if(function_mode == X_SHIFT_MODE) begin
+        if(value_command_in[3] == 1'b0) begin
+            if(x_shift_cnt == VIDEO_WIDTH) begin
+                x_shift_cnt <= 11'b0;
+            end
+            else begin
+                x_shift_cnt <= x_shift_cnt + positive_value_command;
+            end
+        end
+        else if(value_command_in[3] == 1'b1) begin
+            if(x_shift_cnt <= 'd0) begin
+                x_shift_cnt <= VIDEO_WIDTH - 11'd10;
+            end
+            else begin
+                x_shift_cnt <= x_shift_cnt - negative_value_command;
+            end
+        end
+    end
+    else if(function_mode == Y_SHIFT_MODE) begin
+        if(value_command_in[3] == 1'b0) begin
+            if(y_shift_cnt == VIDEO_WIDTH) begin
+                y_shift_cnt <= 11'b0;
+            end
+            else begin
+                y_shift_cnt <= y_shift_cnt + positive_value_command;
+            end
+        end
+        else if(value_command_in[3] == 1'b1) begin
+            if(y_shift_cnt <= 'd0) begin
+                y_shift_cnt <= VIDEO_WIDTH - 11'd10;
+            end
+            else begin
+                y_shift_cnt <= y_shift_cnt - negative_value_command;
+            end
+        end
+    end
+    else begin
+        x_shift_cnt <= 'b0;
+        y_shift_cnt <= 'b0;
+    end
 end
 
 
@@ -264,8 +295,7 @@ always @(posedge clk or negedge rst) begin
 end
 
 
-always@(posedge clk or negedge rst)
-begin
+always@(posedge clk or negedge rst) begin
     if(!rst) begin
         rd_addr <= 'h000000;
     end
@@ -280,10 +310,10 @@ begin
             ROTATE_MODE: begin
                 rd_addr <= rd_burst_addr_start + x_rotate + VIDEO_WIDTH * y_rotate;
             end
-            SHIFT_MODE_X: begin	
+            X_SHIFT_MODE: begin	
                 rd_addr <= rd_burst_addr_start + x_cnt + VIDEO_WIDTH*y_cnt - x_shift_cnt ;
             end	
-            SHIFT_MODE_Y: begin
+            Y_SHIFT_MODE: begin
                 rd_addr <= rd_burst_addr_start + x_cnt + VIDEO_WIDTH*y_cnt - VIDEO_WIDTH*y_shift_cnt;
             end
             SCALE_MODE:	begin
@@ -301,7 +331,7 @@ always@(posedge clk or negedge rst)
 begin
     if(!rst)
         display_number 		<=0;
-    else case( function_mode )
+    else case(function_mode)
         0	:	
             display_number 	<= 0;
         1	:	
@@ -312,8 +342,6 @@ begin
             display_number 	<= 	y_shift_cnt;
         4	:	
             display_number 	<=  scale_value;
-        6    :    
-            display_number 	<=  color_threshold;
         default:	
             display_number 	<= 0;		
     endcase
@@ -335,51 +363,45 @@ coor_trans coor_trans_inst (
 );
 
 
-
-
-always@(posedge clk or negedge rst)
-begin
+always@(posedge clk or negedge rst) begin
     if(!rst)
-        wr_burst_addr_start	<=32'd6220800 ;
-    else if( image_addr_flag )					//image_addr_flag==1
-        wr_burst_addr_start	<=32'd4147200 ;
+        wr_burst_addr_start	<= WR_BASE_ADDR_1 ;
+    else if(image_addr_flag)					//image_addr_flag==1
+        wr_burst_addr_start	<= WR_BASE_ADDR_2 ;
     else	
-        wr_burst_addr_start	<=32'd6220800;		//image_addr_flag==0
+        wr_burst_addr_start	<= WR_BASE_ADDR_1;		//image_addr_flag==0
 end
 
 always@(posedge clk or negedge rst)
 begin
     if(!rst)
-        rd_burst_addr_start	<=32'd2073600;
-    else if( image_addr_flag )					//image_addr_flag==1
-        rd_burst_addr_start	<=32'd0  ;
+        rd_burst_addr_start	<= RD_BASE_ADDR_1;
+    else if(image_addr_flag)					//image_addr_flag==1
+        rd_burst_addr_start	<= RD_BASE_ADDR_2;
     else	
-        rd_burst_addr_start	<=32'd2073600;		//image_addr_flag==0
+        rd_burst_addr_start	<= RD_BASE_ADDR_1;		//image_addr_flag==0
 end
 
 
 always@(posedge clk or negedge rst) begin
     if(!rst) begin
-        angle                <=    'b0;
-        state 				<= IDLE;
-        i_en				<=	1'b1;
-        image_addr_flag		<=	1'b0;
-        
-        wr_valid 		<= 1'b0;
-        rd_valid 		<= 1'b0;
-        
-        rd_burst_len 		<= BURST_LEN;
-        wr_burst_len 		<= BURST_LEN;
-        
+        angle <= 'b0;
+        state <= IDLE;
+        i_en <=	1'b1;
+        image_addr_flag	<= 1'b0;
+        wr_valid <= 1'b0;
+        rd_valid <= 1'b0;
+        rd_burst_len <= BURST_LEN;
+        wr_burst_len <= BURST_LEN;
         wr_addr 		<='h000000;
         write_read_len 		<= 32'd0;
     end
     else if( write_read_len == IMAGE_SIZE ) begin
-        angle	<=		angle_temp;
-        i_en			<=	1'b0;
-        state			<=	IDLE;
-        write_read_len	<= 	32'd0;
-        image_addr_flag	<=	~image_addr_flag;	
+        angle <= angle_temp;
+        i_en <=	1'b0;
+        state <= IDLE;
+        write_read_len <= 32'd0;
+        image_addr_flag	<= ~image_addr_flag;	
         wr_valid 	<=	1'b0;
         rd_valid 	<=	1'b0;		
         wr_addr 	<=	32'd2073600;      
@@ -387,25 +409,35 @@ always@(posedge clk or negedge rst) begin
     else begin
         case(state)
             IDLE: begin
-                i_en			<=	1'b0;
-                state 			<= 	MEM_READ;
-                rd_valid 	<= 	1'b1;
+                if(frame_wr_done) begin
+                    state <= READY;
+                end
+                else if(frame_process_done) begin
+                    state <= IDLE;
+                end
+                else begin
+                    state <= state;
+                end
+            end
+            READY: begin
+                i_en <=	1'b0;
+                state <= MEM_READ;
+                rd_valid <= 1'b1;
             end
             MEM_READ: begin
                 if(rd_burst_finish) begin
-                    state 			<= 	MEM_WRITE;					
-                    rd_valid 	<= 	1'b0;				
-                    wr_valid 	<=	1'b1;		
-                    wr_addr 	<= 	wr_burst_addr_start  +	x_cnt	+	VIDEO_WIDTH*y_cnt;
+                    state <= MEM_WRITE;					
+                    rd_valid <= 1'b0;				
+                    wr_valid <=	1'b1;		
+                    wr_addr <= wr_burst_addr_start + x_cnt + VIDEO_WIDTH*y_cnt;
                 end
             end
             MEM_WRITE: begin
-                if(wr_burst_finish)
-                begin
-                    state 			<=	IDLE;
-                    wr_valid 	<=	1'b0;
-                    write_read_len 	<= write_read_len +	1'b1;
-                    i_en			<=	1'b1;
+                if(wr_burst_finish) begin
+                    state <= READY;
+                    wr_valid <=	1'b0;
+                    write_read_len <= write_read_len + 1'b1;
+                    i_en <= 1'b1;
                 end
             end
             default: state <= IDLE;
@@ -413,5 +445,33 @@ always@(posedge clk or negedge rst) begin
     end
 end
 
+
+// 输出处理完成信号
+// 读为低，写为高，所以一帧处理完成应该是它的下降沿
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        image_addr_flag_d1 <= 'b0;
+        image_addr_flag_d2 <= 'b0;
+    end
+    else begin
+        image_addr_flag_d1 <= image_addr_flag;
+        image_addr_flag_d2 <= image_addr_flag_d1;
+    end
+end
+assign frame_process_done = ((~image_addr_flag_d1) && (image_addr_flag_d2)) ? 1'b1 : 1'b0;
+
+
+// 初始化成功
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        init_done <= 'b0;
+    end
+    else if(write_read_len == IMAGE_SIZE) begin
+        init_done <= 1'b1;
+    end
+    else begin
+        init_done <= init_done;
+    end
+end
 
 endmodule

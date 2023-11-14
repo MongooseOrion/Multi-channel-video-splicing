@@ -72,7 +72,7 @@ module fpga_top#(
     inout       [MEM_DQ_WIDTH-1:0]          mem_dq          ,
     output      [MEM_DQ_WIDTH/8-1:0]        mem_dm          ,
     output reg                              heart_beat_led  ,   // LED_5
-    output                                  ddr_init_done   ,   // LED_2
+    output                                  ddr_init_done   /*synthesis PAP_MARK_DEBUG="1"*/,   // LED_2
     // MS72xx
     output                                  rstn_out        ,
     output                                  iic_tx_scl      ,   // HDMI_OUT
@@ -92,7 +92,7 @@ module fpga_top#(
     output                                  pix_clk_out     ,                           
     output reg                              vs_out          , 
     output reg                              hs_out          , 
-    output reg                              de_out          ,
+    output reg                              de_out          /*synthesis PAP_MARK_DEBUG="1"*/,
     output reg  [7:0]                       r_out           , 
     output reg  [7:0]                       g_out           , 
     output reg  [7:0]                       b_out           ,
@@ -148,7 +148,7 @@ wire                        vs_in_buf           ;
 wire                        de_in_buf           ;
 wire [15:0]                 rgb565_1            ;
 wire [15:0]                 rgb565_2            ;
-wire                        de_re               ;
+wire                        de_re               /*synthesis PAP_MARK_DEBUG="1"*/;
 wire                        de_o                ;
 wire                        hs_o                ;
 wire                        vs_o                ;
@@ -370,7 +370,8 @@ hdmi_data_in u_hdmi_data_in(
 // 图像数据多路载入
 image_global multi_image_load(
     .ddr_clk                (core_clk),
-    .rst                    (ddr_init_done),
+    .sys_rst                (sys_rst),
+    .ddr_init               (ddr_init_done),
     .ctrl_command_in        (ctrl_command),
     .value_command_in       (value_command),
 
@@ -425,73 +426,6 @@ image_global multi_image_load(
 
     .init_done              (init_done)
 );
-
-
-//
-// 强制缩小画面
-/*video_sampling_1 video_sampling(
-    .clk                (cmos1_pclk_16bit   ),
-    .rst                (sys_rst            ),
-    .de_in              (cmos_fusion_href   ),
-    .vs_in              (cmos_fusion_vsync  ),
-    .rgb565_in          (cmos_fusion_data   ),
-    .de_out             (de_in_buf          ),
-    .vs_out             (vs_in_buf          ),
-    .rgb565_out         (i_rgb565           )
-);*/
-
-
-/*
-assign     pclk_in_buf    =    cmos2_pclk_16bit    ;
-assign     vs_in_buf      =    cmos2_vsync_d0      ;
-assign     de_in_buf      =    cmos2_href_16bit    ;
-assign     i_rgb565 = rgb565_2;*/
-
-
-//
-// 帧间数据缓冲
-/*fram_buf fram_buf(
-    .ddr_clk        (  core_clk             ),//input                         ddr_clk,
-    .ddr_rstn       (  ddr_init_done        ),//input                         ddr_rstn,
-    //data_in                                  
-    .vin_clk        (  pclk_in_buf         ),//input                         vin_clk,
-    .wr_fsync       (  vs_in_buf           ),//input                         wr_fsync,
-    .wr_en          (  de_in_buf           ),//input                         wr_en,
-    .wr_data        (  i_rgb565             ),//input  [15 : 0]  wr_data,
-    //data_out
-    .vout_clk       (  pix_clk_out         ),//input                         vout_clk,
-    .rd_fsync       (  vs_o                ),//input                         rd_fsync,
-    .rd_en          (  de_re               ),//input                         rd_en,
-    .vout_de        (  de_o                ),//output                        vout_de,
-    .vout_data      (  o_rgb565             ),//output [PIX_WIDTH- 1'b1 : 0]  vout_data,
-    .init_done      (  init_done            ),//output reg                    init_done,
-    //axi bus
-    .axi_awaddr     (  axi_awaddr           ),// output[27:0]
-    .axi_awid       (  axi_awuser_id        ),// output[3:0]
-    .axi_awlen      (  axi_awlen            ),// output[3:0]
-    .axi_awsize     (                       ),// output[2:0]
-    .axi_awburst    (                       ),// output[1:0]
-    .axi_awready    (  axi_awready          ),// input
-    .axi_awvalid    (  axi_awvalid          ),// output               
-    .axi_wdata      (  axi_wdata            ),// output[255:0]
-    .axi_wstrb      (  axi_wstrb            ),// output[31:0]
-    .axi_wlast      (  axi_wusero_last      ),// input
-    .axi_wvalid     (                       ),// output
-    .axi_wready     (  axi_wready           ),// input
-    .axi_bid        (  4'd0                 ),// input[3:0]
-    .axi_araddr     (  axi_araddr           ),// output[27:0]
-    .axi_arid       (  axi_aruser_id        ),// output[3:0]
-    .axi_arlen      (  axi_arlen            ),// output[3:0]
-    .axi_arsize     (                       ),// output[2:0]
-    .axi_arburst    (                       ),// output[1:0]
-    .axi_arvalid    (  axi_arvalid          ),// output
-    .axi_arready    (  axi_arready          ),// input
-    .axi_rready     (                       ),// output
-    .axi_rdata      (  axi_rdata            ),// input[255:0]
-    .axi_rvalid     (  axi_rvalid           ),// input
-    .axi_rlast      (  axi_rlast            ),// input
-    .axi_rid        (  axi_rid              ) // input[3:0]         
-);*/
 
 
 //

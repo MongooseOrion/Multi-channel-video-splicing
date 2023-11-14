@@ -78,7 +78,7 @@ always @(posedge hdmi_pix_clk_in or negedge rst) begin
         vs_out_temp <= 1'b0;
     end
 end
-assign vs_out = vs_in_1;
+assign vs_out = vs_out_temp;
 
 
 // 每两帧丢第二帧

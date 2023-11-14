@@ -38,33 +38,31 @@ module axi_interconnect_wr #(
     input                               clk,                // ddr core clk
     input                               rst,
     // 通道 1
-    input                               channel1_rready ,
+    input                               channel1_rready /*synthesis PAP_MARK_DEBUG="1"*/,
     input       [DQ_WIDTH*8-1'b1:0]     channel1_data   ,
     input                               channel1_vsync  ,
-    output reg                          channel1_rd_en  ,
+    output reg                          channel1_rd_en  /*synthesis PAP_MARK_DEBUG="1"*/,
     // 通道 2
-    input                               channel2_rready ,
+    input                               channel2_rready /*synthesis PAP_MARK_DEBUG="1"*/,
     input       [DQ_WIDTH*8-1'b1:0]     channel2_data   ,
     input                               channel2_vsync  ,
-    output reg                          channel2_rd_en  ,
+    output reg                          channel2_rd_en  /*synthesis PAP_MARK_DEBUG="1"*/,
     // 通道 3
-    input                               channel3_rready ,
+    input                               channel3_rready /*synthesis PAP_MARK_DEBUG="1"*/,
     input       [DQ_WIDTH*8-1'b1:0]     channel3_data   ,
     input                               channel3_vsync  ,
-    output reg                          channel3_rd_en  ,
+    output reg                          channel3_rd_en  /*synthesis PAP_MARK_DEBUG="1"*/,
     // 通道 4
-    input                               channel4_rready ,
+    input                               channel4_rready /*synthesis PAP_MARK_DEBUG="1"*/,
     input       [DQ_WIDTH*8-1'b1:0]     channel4_data   ,
     input                               channel4_vsync  ,
-    output reg                          channel4_rd_en  ,
+    output reg                          channel4_rd_en  /*synthesis PAP_MARK_DEBUG="1"*/,
     // 通道 5
-    input                               channel5_rready ,
+    input                               channel5_rready /*synthesis PAP_MARK_DEBUG="1"*/,
     input       [DQ_WIDTH*8-1'b1:0]     channel5_data   ,
     input                               channel5_vsync  ,
-    output reg                          channel5_rd_en  ,
+    output reg                          channel5_rd_en  /*synthesis PAP_MARK_DEBUG="1"*/,
 
-    input                               processing_wait ,           // 需要进行图像处理，请等待
-    output reg                          wait_proceed    ,           // 操作成功指令
     // 写完成，用于其他模块初始化
     output reg                          init_qd_done    ,
     output reg                          init_tc_done    ,
@@ -128,6 +126,7 @@ wire                            pose_vs_3;
 wire                            pose_vs_4;
 wire                            pose_vs_5;
 wire                            pose_awvalid;
+wire  [15:0]                     axi_wdata_reg/*synthesis PAP_MARK_DEBUG="1"*/;
 
 reg [CTRL_ADDR_WIDTH-1:0]       reg_axi_awaddr  ;
 reg                             reg_axi_awvalid ;
@@ -136,7 +135,8 @@ reg                             reg_axi_wvalid  ;
 reg                             reg_axi_bready  ;
 reg                             reg_axi_rready  ;
 
-reg [3:0]                       buf_rd_state        ;
+reg                             processing_wait     ;
+reg [3:0]                       buf_rd_state        /*synthesis PAP_MARK_DEBUG="1"*/;
 reg                             channel1_vs         ;
 reg                             channel1_vs_d1      ;
 reg                             channel2_vs         ;
@@ -153,21 +153,13 @@ reg [1:0]                       frame_count_3       ;
 reg [1:0]                       frame_count_4       ;
 reg [1:0]                       frame_count_5       ;
 reg                             awvalid_temp        ;
-reg [15:0]                      reg_axi_awaddr_1    ;
-reg [15:0]                      reg_axi_awaddr_2    ;
-reg [15:0]                      reg_axi_awaddr_3    ;
-reg [15:0]                      reg_axi_awaddr_4    ;
-reg [19:0]                      reg_axi_awaddr_5    ;
-reg                             read_flag_1         ;
-reg                             read_flag_2         ;
-reg                             read_flag_3         ;
-reg                             read_flag_4         ;
-reg                             read_flag_5         ;
-reg                             pre_rd_en_1         ;
-reg                             pre_rd_en_2         ;
-reg                             pre_rd_en_3         ;
-reg                             pre_rd_en_4         ;
-reg                             pre_rd_en_5         ;
+reg [15:0]                      reg_axi_awaddr_1    /*synthesis PAP_MARK_DEBUG="1"*/;
+reg [15:0]                      reg_axi_awaddr_2    /*synthesis PAP_MARK_DEBUG="1"*/;
+reg [15:0]                      reg_axi_awaddr_3   /*synthesis PAP_MARK_DEBUG="1"*/ ;
+reg [15:0]                      reg_axi_awaddr_4   /*synthesis PAP_MARK_DEBUG="1"*/ ;
+reg [19:0]                      reg_axi_awaddr_5   /*synthesis PAP_MARK_DEBUG="1"*/ ;
+
+assign axi_wdata_reg = axi_wdata;
 
 assign axi_awaddr   = reg_axi_awaddr        ;
 assign axi_awvalid  = reg_axi_awvalid       ;
@@ -309,7 +301,7 @@ always @(posedge clk or negedge rst) begin
                     buf_rd_state <= buf_rd_state;
                 end
             end
-            CH5_ADDR: begin
+            CH5_DATA: begin
                 if((axi_wlast === 1'b1) && (processing_wait == 1'b0)) begin
                     buf_rd_state <= CH1_WAIT;
                 end
@@ -322,23 +314,6 @@ always @(posedge clk or negedge rst) begin
             end
             default: buf_rd_state <= INIT_WAIT;
         endcase
-    end
-end
-
-
-// 传回强制等待操作成功指令
-always @(posedge clk or negedge rst) begin
-    if(!rst) begin
-        wait_proceed <= 'b0;
-    end
-    else if((processing_wait == 1'b1) && (buf_rd_state == INIT_WAIT)) begin
-        wait_proceed <= 1'b1;
-    end
-    else if(processing_wait) begin
-        wait_proceed <= 1'b0;
-    end
-    else begin
-        wait_proceed <= wait_proceed;
     end
 end
 
@@ -457,36 +432,6 @@ always @(posedge clk or negedge rst) begin
         reg_axi_awaddr_4 <= 'b0;
         reg_axi_awaddr_5 <= 'b0;
         reg_axi_awaddr <= 'b0;
-        read_flag_1 <= 'b0;
-        read_flag_2 <= 'b0;
-        read_flag_3 <= 'b0;
-        read_flag_4 <= 'b0;
-        read_flag_5 <= 'b0;
-        pre_rd_en_1 <= 'b0;
-        pre_rd_en_2 <= 'b0;
-        pre_rd_en_3 <= 'b0;
-        pre_rd_en_4 <= 'b0;
-        pre_rd_en_5 <= 'b0;
-    end
-    else if(pose_vs_1) begin
-        reg_axi_awaddr_1 <= 'b0;
-        read_flag_1 <= 'b0;
-    end
-    else if(pose_vs_2) begin
-        reg_axi_awaddr_2 <= 'b0;
-        read_flag_2 <= 'b0;
-    end
-    else if(pose_vs_3) begin
-        reg_axi_awaddr_3 <= 'b0;
-        read_flag_3 <= 'b0;
-    end
-    else if(pose_vs_4) begin
-        reg_axi_awaddr_4 <= 'b0;
-        read_flag_4 <= 'b0;
-    end
-    else if(pose_vs_5) begin
-        reg_axi_awaddr_5 <= 'b0;
-        read_flag_5 <= 'b0;
     end
     else begin
         case(buf_rd_state)
@@ -525,20 +470,6 @@ always @(posedge clk or negedge rst) begin
                         reg_axi_awaddr_1 <= reg_axi_awaddr_1;
                     end
                 end
-                // 预读取设置
-                if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
-                    read_flag_1 <= 1'b1;
-                    if(read_flag_1 == 1'b0) pre_rd_en_1 <= 1'b1;
-                    else pre_rd_en_1 <= 1'b0;
-                end
-                else begin
-                    read_flag_1 <= read_flag_1;                 // 上电后变化一次后，不再变化        
-                end 
-            end
-            CH1_DATA: begin
-                if(pre_rd_en_1) begin
-                    pre_rd_en_1 <= 1'b0;
-                end
             end
             CH2_ADDR: begin
                 // 握手设置
@@ -574,21 +505,7 @@ always @(posedge clk or negedge rst) begin
                         reg_axi_awaddr <= reg_axi_awaddr;
                         reg_axi_awaddr_2 <= reg_axi_awaddr_2;
                     end
-                end
-                // 预读取设置
-                if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
-                    read_flag_2 <= 1'b1;
-                    if(read_flag_2 == 1'b0) pre_rd_en_2 <= 1'b1;
-                    else pre_rd_en_2 <= 1'b0;
-                end
-                else begin
-                    read_flag_2 <= read_flag_2;                 // 上电后变化一次后，不再变化        
                 end 
-            end
-            CH2_DATA: begin
-                if(pre_rd_en_2) begin
-                    pre_rd_en_2 <= 1'b0;
-                end
             end
             CH3_ADDR: begin
                 // 握手设置
@@ -624,20 +541,6 @@ always @(posedge clk or negedge rst) begin
                         reg_axi_awaddr <= reg_axi_awaddr;
                         reg_axi_awaddr_3 <= reg_axi_awaddr_3;
                     end
-                end
-                // 预读取设置
-                if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
-                    read_flag_3 <= 1'b1;
-                    if(read_flag_3 == 1'b0) pre_rd_en_3 <= 1'b1;
-                    else pre_rd_en_3 <= 1'b0;
-                end
-                else begin
-                    read_flag_3 <= read_flag_3;                 // 上电后变化一次后，不再变化        
-                end 
-            end
-            CH3_DATA: begin
-                if(pre_rd_en_3) begin
-                    pre_rd_en_3 <= 1'b0;
                 end
             end
             CH4_ADDR: begin
@@ -675,20 +578,6 @@ always @(posedge clk or negedge rst) begin
                         reg_axi_awaddr_4 <= reg_axi_awaddr_4;
                     end
                 end
-                // 预读取设置
-                if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
-                    read_flag_4 <= 1'b1;
-                    if(read_flag_4 == 1'b0) pre_rd_en_4 <= 1'b1;
-                    else pre_rd_en_4 <= 1'b0;
-                end
-                else begin
-                    read_flag_4 <= read_flag_4;                 // 上电后变化一次后，不再变化        
-                end 
-            end
-            CH4_DATA: begin
-                if(pre_rd_en_4) begin
-                    pre_rd_en_4 <= 1'b0;
-                end
             end
             CH5_ADDR: begin
                 // 握手设置
@@ -725,15 +614,6 @@ always @(posedge clk or negedge rst) begin
                         reg_axi_awaddr_5 <= reg_axi_awaddr_5;
                     end
                 end
-                // 预读取设置
-                if((axi_awvalid == 1'b1) && (axi_awready == 1'b1)) begin
-                    read_flag_5 <= 1'b1;
-                    if(read_flag_5 == 1'b0) pre_rd_en_5 <= 1'b1;
-                    else pre_rd_en_5 <= 1'b0;
-                end
-                else begin
-                    read_flag_5 <= read_flag_5;                 // 上电后变化一次后，不再变化        
-                end 
             end
             default: begin
                 awvalid_temp <= awvalid_temp;
@@ -744,43 +624,47 @@ always @(posedge clk or negedge rst) begin
                 reg_axi_awaddr_4 <= reg_axi_awaddr_4;
                 reg_axi_awaddr_5 <= reg_axi_awaddr_5;
                 reg_axi_awaddr <= reg_axi_awaddr;
-                read_flag_1 <= read_flag_1;
-                read_flag_2 <= read_flag_2;
-                read_flag_3 <= read_flag_3;
-                read_flag_4 <= read_flag_4;
-                read_flag_5 <= read_flag_5;
-                pre_rd_en_1 <= pre_rd_en_1;
-                pre_rd_en_2 <= pre_rd_en_2;
-                pre_rd_en_3 <= pre_rd_en_3;
-                pre_rd_en_4 <= pre_rd_en_4;
-                pre_rd_en_5 <= pre_rd_en_5;
             end
         endcase
+    end
+    if(pose_vs_1) begin
+        reg_axi_awaddr_1 <= 'b0;
+    end
+    if(pose_vs_2) begin
+        reg_axi_awaddr_2 <= 'b0;
+    end
+    if(pose_vs_3) begin
+        reg_axi_awaddr_3 <= 'b0;
+    end
+    if(pose_vs_4) begin
+        reg_axi_awaddr_4 <= 'b0;
+    end
+    if(pose_vs_5) begin
+        reg_axi_awaddr_5 <= 'b0;
     end
 end 
 
 
-// 状态机内的数据信号，不使用时序逻辑实现以避免延迟
 always @(*) begin
     case(buf_rd_state)
         CH1_DATA: begin
-            channel1_rd_en <= (pre_rd_en_1) ? 1'b1 : axi_wready;
+            channel1_rd_en <=  axi_wready;
             reg_axi_wdata <= channel1_data;
         end
         CH2_DATA: begin
-            channel2_rd_en <= (pre_rd_en_2) ? 1'b1 : axi_wready;
+            channel2_rd_en <=  axi_wready;
             reg_axi_wdata <= channel2_data;
         end
         CH3_DATA: begin
-            channel3_rd_en <= (pre_rd_en_3) ? 1'b1 : axi_wready;
+            channel3_rd_en <=  axi_wready;
             reg_axi_wdata <= channel3_data;
         end
         CH4_DATA: begin
-            channel4_rd_en <= (pre_rd_en_4) ? 1'b1 : axi_wready;
+            channel4_rd_en <=  axi_wready;
             reg_axi_wdata <= channel4_data;
         end
         CH5_DATA: begin
-            channel5_rd_en <= (pre_rd_en_5) ? 1'b1 : axi_wready;
+            channel5_rd_en <=  axi_wready;
             reg_axi_wdata <= channel5_data;
         end
         default:begin
@@ -802,13 +686,13 @@ always @(posedge clk or negedge rst) begin
         init_tc_done <= 'b0;            // 下部分
         init_done <= 'b0;               // 全局
     end
-    else if((reg_axi_awaddr_1 == WIDTH_QD * HEIGHT_QD * 16 / 64)
-            && (reg_axi_awaddr_2 == WIDTH_QD * HEIGHT_QD * 16 / 64)
-            && (reg_axi_awaddr_3 == WIDTH_QD * HEIGHT_QD * 16 / 64)
-            && (reg_axi_awaddr_4 == WIDTH_QD * HEIGHT_QD * 16 / 64)) begin
+    else if((reg_axi_awaddr_1 >= WIDTH_QD * HEIGHT_QD * 16 / 64)
+            && (reg_axi_awaddr_2 >= WIDTH_QD * HEIGHT_QD * 16 / 64)
+            && (reg_axi_awaddr_3 >= WIDTH_QD * HEIGHT_QD * 16 / 64)
+            && (reg_axi_awaddr_4 >= WIDTH_QD * HEIGHT_QD * 16 / 64)) begin
         init_qd_done <= 1'b1;
     end
-    else if(reg_axi_awaddr_5 == WIDTH_TC * HEIGHT_TC * 16 / 64) begin
+    else if(reg_axi_awaddr_5 >= WIDTH_TC * HEIGHT_TC * 16 / 64) begin
         init_tc_done <= 1'b1;
     end
     else if((init_qd_done == 1'b1) || (init_tc_done == 1'b1)) begin

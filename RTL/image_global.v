@@ -33,9 +33,9 @@ module image_global#(
     parameter                     MEM_DQ_WIDTH         = 32    ,
     parameter M_ADDR_WIDTH      = 5'd5             // buf 读通道位宽
 )(
-    input               ddr_clk                     ,
+    input               ddr_clk                     /*synthesis PAP_MARK_DEBUG="1"*/,
     input               sys_rst                     ,
-    input               ddr_init                    ,
+    input               ddr_init                    /*synthesis PAP_MARK_DEBUG="1"*/,
     input       [3:0]   ctrl_command_in             ,
     input       [3:0]   value_command_in            ,
     
@@ -60,41 +60,41 @@ module image_global#(
     // 取数据 RAM 所需的同步信号
     input                           vesa_out_clk    ,
     input                           vesa_out_vsync  ,
-    input                           vesa_out_de     ,
-    output [15:0]                   vesa_out_data   ,
-    output                          de_out          ,
+    input                           vesa_out_de     /*synthesis PAP_MARK_DEBUG="1"*/ ,
+    output [15:0]                   vesa_out_data   /*synthesis PAP_MARK_DEBUG="1"*/,
+    output                          de_out          /*synthesis PAP_MARK_DEBUG="1"*/,
     
     // AXI 总线
-    output [CTRL_ADDR_WIDTH-1:0]    axi_awaddr      ,
+    output [CTRL_ADDR_WIDTH-1:0]    axi_awaddr      /*synthesis PAP_MARK_DEBUG="1"*/,
     output [3:0]                    axi_awid        ,
     output [3:0]                    axi_awlen       ,
     output [2:0]                    axi_awsize      ,
     output [1:0]                    axi_awburst     ,
-    input                           axi_awready     ,
-    output                          axi_awvalid     ,
+    input                           axi_awready     /*synthesis PAP_MARK_DEBUG="1"*/,
+    output                          axi_awvalid    /*synthesis PAP_MARK_DEBUG="1"*/ ,
 
     output [MEM_DQ_WIDTH*8-1:0]     axi_wdata       ,
     output [MEM_DQ_WIDTH -1 :0]     axi_wstrb       ,
-    input                           axi_wlast       ,
+    input                           axi_wlast       /*synthesis PAP_MARK_DEBUG="1"*/,
     output                          axi_wvalid      ,
-    input                           axi_wready      ,
+    input                           axi_wready      /*synthesis PAP_MARK_DEBUG="1"*/,
     input  [3 : 0]                  axi_bid         ,                                      
 
-    output [CTRL_ADDR_WIDTH-1:0]    axi_araddr      ,
+    output [CTRL_ADDR_WIDTH-1:0]    axi_araddr     /*synthesis PAP_MARK_DEBUG="1"*/ ,
     output [3:0]                    axi_arid        ,
     output [3:0]                    axi_arlen       ,
     output [2:0]                    axi_arsize      ,
     output [1:0]                    axi_arburst     ,
-    output                          axi_arvalid     ,
-    input                           axi_arready     ,
+    output                          axi_arvalid     /*synthesis PAP_MARK_DEBUG="1"*/,
+    input                           axi_arready     /*synthesis PAP_MARK_DEBUG="1"*/,
 
-    output                          axi_rready      ,
+    output                          axi_rready     /*synthesis PAP_MARK_DEBUG="1"*/ ,
     input  [MEM_DQ_WIDTH*8-1:0]     axi_rdata       ,
-    input                           axi_rvalid      ,
-    input                           axi_rlast       ,
+    input                           axi_rvalid     /*synthesis PAP_MARK_DEBUG="1"*/ ,
+    input                           axi_rlast       /*synthesis PAP_MARK_DEBUG="1"*/,
     input  [3:0]                    axi_rid         ,
 
-    output                          init_done
+    output                          init_done /*synthesis PAP_MARK_DEBUG="1"*/
 );
 
 // 聚焦视图切换代码
@@ -122,9 +122,10 @@ wire                            buf_wr_en           ;
 wire [MEM_DQ_WIDTH*8-1'b1:0]    buf_wr_data         ;
 wire                            init_tc_done        ;
 wire                            init_qd_done        ;
-//wire                            
+wire [15:0]                     rgb565_out_1        ;
+wire [15:0]                     rgb565_out_2        ;                  
 
-reg [3:0]   reg_value_command   ;
+reg [3:0]   reg_value_command   /*synthesis PAP_MARK_DEBUG="1"*/;
 reg         ultimate_clk_in     ;
 reg         ultimate_de_in      ;
 reg         ultimate_vs_in      ;
@@ -132,7 +133,7 @@ reg [15:0]  ultimate_data_in    ;
 
 
 // 相机 1 1/16
-video_sampling #(
+video_sampling_1 #(
     .IMAGE_TAG          (4'd1),
     .SEL_MODE           (2'd1)
 )video_sampling_cmos1 (
@@ -151,7 +152,7 @@ video_sampling #(
 
 
 // 相机 2 1/16
-video_sampling #(
+video_sampling_1 #(
     .IMAGE_TAG          (4'd2),
     .SEL_MODE           (2'd1)
 )video_sampling_cmos2 (
@@ -170,7 +171,7 @@ video_sampling #(
 
 
 // 相机融合 1/16
-video_sampling #(
+video_sampling_1 #(
     .IMAGE_TAG          (4'd3),
     .SEL_MODE           (2'd1)
 )video_sampling_cmos_fusion (
@@ -189,7 +190,7 @@ video_sampling #(
 
 
 // HDMI 1/16
-video_sampling #(
+video_sampling_1 #(
     .IMAGE_TAG          (4'd4),
     .SEL_MODE           (2'd1)
 )video_sampling_hdmi (
@@ -258,9 +259,8 @@ always @(*) begin
     endcase
 end
 
-video_sampling #(
-    .IMAGE_TAG          (4'd5),
-    .SEL_MODE           (2'd2)
+video_sampling_2 #(
+    .IMAGE_TAG          (4'd5)
 )video_sampling_ultimate (
     .clk                (ultimate_clk_in    ),
     .rst                (sys_rst            ),
@@ -305,9 +305,6 @@ axi_interconnect_wr u_axi_interconnect_wr(
     .channel5_rready                (channel5_rready    ),
     .channel5_rd_en                 (channel5_rd_en     ),
     .channel5_data                  (channel5_data      ),
-
-    .processing_wait                (image_process_wait ),
-    .wait_proceed                   (wait_proceed       ),
     
     .init_qd_done                   (init_qd_done       ),
     .init_tc_done                   (init_tc_done       ),
@@ -335,12 +332,12 @@ axi_interconnect_wr u_axi_interconnect_wr(
 axi_interconnect_rd u_axi_interconnect_rd(
     .clk                        (ddr_clk        ),
     .rst                        (ddr_init       ),
-    .init_tc_done               (init_tc_done   ),
-    .channel_sel                (channel_sel     ),
-    .buf_wr_en                  (buf_wr_en       ),
-    .buf_wr_data                (buf_wr_data     ),
-    .hdmi_vsync                 (vesa_out_vsync  ),
-    .hdmi_href                  (vesa_out_de     ),
+
+    .hdmi_vsync                 (vesa_out_vsync ),
+    .hdmi_href                  (vesa_out_de    ),
+    .frame_instruct             (frame_instruct ),
+    .buf_wr_data                (buf_wr_data),
+    .buf_wr_en                  (buf_wr_en),
 
     .axi_arvalid                (axi_arvalid ),
     .axi_arready                (axi_arready ),
@@ -359,7 +356,18 @@ axi_interconnect_rd u_axi_interconnect_rd(
 
 // 输出数据缓存 buf
 ddr_rd_buf u_ddr_rd_buf(
-    
+    .clk                        (ddr_clk        ), 
+    .rst                        (ddr_init       ),  
+    .frame_instruct             (frame_instruct ), 
+    .buf_wr_en                  (buf_wr_en      ),
+    .buf_wr_data                (buf_wr_data    ),
+    .rd_clk                     (vesa_out_clk   ), 
+    .rd_rst                     (ddr_init       ), 
+    .rd_en                      (vesa_out_de    ), 
+    .rd_fsync                   (vesa_out_vsync ), 
+    .de_o                       (de_out         ), 
+    .rgb565_out                 (vesa_out_data  )
 );
+
 
 endmodule
