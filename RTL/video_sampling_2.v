@@ -36,11 +36,10 @@ module video_sampling_2 #(
     input               clk,
     input               rst,
     // 信号输入
-    input               de_in               /*synthesis PAP_MARK_DEBUG="1"*/,
-    input               vs_in               /*synthesis PAP_MARK_DEBUG="1"*/,
-    input       [15:0]  rgb565_in           ,
-    input       [3:0]   ctrl_command_in     ,
-    input       [3:0]   value_command_in    ,
+    input                                   de_in           /*synthesis PAP_MARK_DEBUG="1"*/,
+    input                                   vs_in           /*synthesis PAP_MARK_DEBUG="1"*/,
+    input       [15:0]                      rgb565_in       ,
+    input       [3:0]                       scale_mode      ,
     // 发往 DDR 存储
     input                                   rd_clk          ,
     output      [DQ_WIDTH*8-1'b1:0]         rd_data         ,
@@ -55,35 +54,129 @@ parameter HEIGHT_QD = VIDEO_HEIGHT / 'd4;
 parameter WIDTH_TC = (VIDEO_WIDTH / 4) * 3;
 parameter HEIGHT_TC = (VIDEO_HEIGHT / 4) * 3;
 
-wire        pose_vs_in;
-wire        nege_vs_in;
-reg         wr_en_2;
-wire        almost_full;
+wire        pose_row_en ;
+wire        nege_row_en ;
+wire        pose_vs_in  ;
+wire        nege_vs_in  ;
+wire        almost_full ;
 
 reg                             vs_in_d1        ; 
 reg                             de_in_d1        ; 
 reg [10:0]                      href_count      /*synthesis PAP_MARK_DEBUG="1"*/; 
 reg [3:0]                       pix_count       /*synthesis PAP_MARK_DEBUG="1"*/;
-reg                             wr_en_tr        /*synthesis PAP_MARK_DEBUG="1"*/ ;     
-reg [15:0]                      wr_data_temp    ;
-reg [15:0]                      wr_data         /*synthesis PAP_MARK_DEBUG="1"*/;
-reg [10:0]                      row_pix_count;
+reg                             raw_data_valid  /*synthesis PAP_MARK_DEBUG="1"*/ ;     
+reg [15:0]                      wr_data_temp_1  ;
+reg [15:0]                      wr_data_temp_2  ;
+wire [15:0]                     wr_data         /*synthesis PAP_MARK_DEBUG="1"*/;
+reg [10:0]                      pix_count_act   /*synthesis PAP_MARK_DEBUG="1"*/;
+reg [10:0]                      pix_count_act1  /*synthesis PAP_MARK_DEBUG="1"*/;
 reg                             pre_en          /*synthesis PAP_MARK_DEBUG="1"*/;
+reg [4:0]                       scale_value     ;
+reg                             wr_en_2         /*synthesis PAP_MARK_DEBUG="1"*/ ;
+reg                             wr_en_2_d1      ;
+reg                             wr_en_final     /*synthesis PAP_MARK_DEBUG="1"*/;
+reg [10:0]                      href_count_act  /*synthesis PAP_MARK_DEBUG="1"*/;
+reg                             wr_en_add       /*synthesis PAP_MARK_DEBUG="1"*/;
+reg                             wr_en_add_pre   /*synthesis PAP_MARK_DEBUG="1"*/;
+reg [8:0]                       wr_en_add_cnt   /*synthesis PAP_MARK_DEBUG="1"*/;
+reg                             row_en          /*synthesis PAP_MARK_DEBUG="1"*/;
+reg                             row_en_d1       ;
+reg [9:0]                       pix_add         ; //需补充的像素
+reg [9:0]                       zoom_mod        ; // 取余的参数
 
 
-// 写入有效的像素个数计数
+// 缩放倍率选择
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
-        row_pix_count <= 'b0;
+        pix_add = 'd1 ;
+        zoom_mod = 'd1000;
+    end
+    else if(scale_mode == 'd0) begin
+        pix_add = 'd1 ;
+        zoom_mod = 'd1000 ;
+    end
+    else if (scale_mode == 'd1) begin  //20抽1；
+        pix_add = 'd48 ;
+        zoom_mod = 'd20 ;       
+    end
+    else if (scale_mode == 'd2) begin  //15抽1；
+        pix_add = 'd64 ;
+        zoom_mod = 'd15 ;       
+    end
+    else if (scale_mode == 'd3) begin  //10抽1；
+        pix_add = 'd96 ;
+        zoom_mod = 'd10 ;  
+    end 
+    else if (scale_mode == 'd4) begin  //9抽1；
+        pix_add = 'd107 ;
+        zoom_mod = 'd9 ;    
+   end
+    else if (scale_mode == 'd5) begin  //8抽1；
+        pix_add = 'd120 ;
+        zoom_mod = 'd8 ;       
+    end
+    else if (scale_mode == 'd6) begin  //7抽1；
+        pix_add = 'd138 ;
+        zoom_mod = 'd7 ;       
+    end
+    else if (scale_mode == 'd7) begin  //6抽1；
+        pix_add = 'd160 ;
+        zoom_mod = 'd6 ;  
+    end 
+    else if (scale_mode == 'd8) begin  //5抽1；
+        pix_add = 'd192 ;
+        zoom_mod = 'd5  ;    
+    end
+    else if (scale_mode == 'd9) begin  //4抽1；
+        pix_add = 'd240 ;
+        zoom_mod = 'd4  ;    
+   end
+    else if (scale_mode == 'd10) begin  //3抽1；
+        pix_add = 'd320 ;
+        zoom_mod = 'd3  ;    
+    end
+    else if (scale_mode == 'd11) begin  //2抽1；
+        pix_add = 'd480 ;
+        zoom_mod = 'd2  ;    
+   end
+end
+
+
+// 当前写入有效的像素个数计数
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        pix_count_act <= 'b0;
+    end
+    else if((pose_vs_in) || (nege_de_in)) begin
+        pix_count_act <= 'd0;
+    end
+    else if(raw_data_valid == 1'b1) begin
+        if(pix_count_act == 'd960 - 1'b1) begin
+            pix_count_act <= pix_count_act;
+        end
+        else begin
+            pix_count_act <= pix_count_act + 1'b1;
+        end
+    end
+    else begin
+        pix_count_act <= pix_count_act;
+    end
+end
+
+
+// 真正写入 fifo 有效显示像素计数,作为 pre_en 的拉高信号
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        pix_count_act1 <= 'b0;
     end
     else if(pose_vs_in) begin
-        row_pix_count <= 'd0;
+        pix_count_act1 <= 'd0;
     end
-    else if (wr_en_tr == 1'b1 && row_pix_count < 'd30) begin
-        row_pix_count <= row_pix_count + 1'b1;
+    else if (wr_en_final == 1'b1 && pix_count_act1 < 'd30) begin
+        pix_count_act1 <= pix_count_act1 + 1'b1;
     end
-    else if (row_pix_count >= 'd30)begin
-        row_pix_count <= row_pix_count;
+    else if (pix_count_act1 >= 'd30)begin
+        pix_count_act1 <= pix_count_act1;
     end
 end
 
@@ -93,7 +186,7 @@ always @(posedge rd_clk or negedge rst) begin
     if(!rst) begin
         pre_en <= 'b0;
     end
-    else if (row_pix_count == 'd20) begin
+    else if (pix_count_act1 == 'd20) begin
         pre_en <= 1'b1;
     end
     else begin
@@ -131,10 +224,10 @@ always @(posedge clk or negedge rst) begin
     if(!rst) begin
         href_count <= 'b0;
     end
-    else if (pose_vs_in == 1'b1) begin
+    else if(pose_vs_in) begin
         href_count <= 'b0;
     end 
-    else if(nege_de_in == 1'b1) begin
+    else if(nege_de_in) begin
         href_count <= href_count + 1'b1;
     end
     else begin
@@ -162,7 +255,7 @@ always @(posedge clk or negedge rst) begin
     if(!rst) begin
         pix_count <= 'b0;
     end
-    else if (pose_vs_in == 1'b1) begin
+    else if(pose_vs_in == 1'b1) begin
         pix_count <= 'b0;
     end
     else if(wr_en_2) begin
@@ -179,38 +272,158 @@ always @(posedge clk or negedge rst) begin
 end
 
 
-// 最终的写使能信号
+// 数据实际有效信号
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
-        wr_en_tr <= 'b0;
+        raw_data_valid <= 'b0;
     end
     else if((wr_en_2 == 1'b1) && (pix_count != 4'd3)) begin
-        wr_en_tr <= 1'b1;
+        raw_data_valid <= 1'b1;
     end
     else begin
-        wr_en_tr <= 1'b0;
+        raw_data_valid <= 1'b0;
     end
 end
 
-
-// 写数据信号
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
-        wr_data_temp <= 'b0;
-        wr_data <= 'b0;
+        wr_en_2_d1 <= 'b0;
     end
     else begin
-        wr_data_temp <= rgb565_in;
-        wr_data <= wr_data_temp;
+        wr_en_2_d1 <= wr_en_2;
     end
 end
+assign nege_wr_en_2 = ((~wr_en_2) && (wr_en_2_d1)) ? 1'b1 : 1'b0;
+
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        href_count_act <= 'b0;
+    end
+    else if(pose_vs_in) begin
+        href_count_act <= 'd0;
+    end
+    else if(wr_en_2_d1) begin
+        if(nege_de_in) begin
+            if(href_count_act == HEIGHT_TC - 1'b1) begin
+                href_count_act <= 11'd0;
+            end
+            else begin
+                href_count_act <= href_count_act + 1'b1;
+            end
+        end
+        else begin
+            href_count_act <= href_count_act;
+        end
+    end
+    else begin
+        href_count_act <= href_count_act;
+    end
+end
+
+
+// 在经过四丢一后的 wr_en_2 信号重新抽行,当前 10 丢 1
+always @(posedge clk or negedge rst) begin
+    if (!rst) begin
+        row_en <= 1'b0;
+    end
+    else if((href_count_act % zoom_mod == 'd0) && (href_count_act != 'd0)) begin
+        row_en <= 1'b0;
+    end
+    else begin
+        row_en <= wr_en_2;
+    end
+end
+
+
+//在经过四丢1的 raw_data_valid 行像素使能信号 使用10丢1,剩下的都是一行内要显示的有用的像素数据
+always @(posedge clk or negedge rst) begin
+    if (!rst) begin
+        wr_en_final <= 1'b0 ;
+    end
+    else if ((pix_count_act % zoom_mod != 'd0) && row_en == 1'b1) begin
+        wr_en_final <= raw_data_valid;
+    end
+    else begin
+        wr_en_final <= 1'b0;
+    end
+end
+
+always @(posedge clk or negedge rst) begin
+    if (!rst) begin
+        row_en_d1 <= 'd0;
+    end
+    else begin
+        row_en_d1 <= row_en;
+    end
+end
+
+assign pose_row_en = ((row_en) && (~row_en_d1)) ? 1'b1 : 1'b0;
+assign nege_row_en = ((~row_en) && (row_en_d1)) ? 1'b1 : 1'b0;
+
+
+// 一行的下降沿到下一行的上升沿期间拉高，
+always @(posedge clk or negedge rst) begin
+    if (!rst) begin
+        wr_en_add_pre <= 1'b0;
+    end
+    else if (pose_row_en == 1'b1 || pose_vs_in == 1'b1 || href_count > 'd719) begin
+        wr_en_add_pre <= 1'b0;
+    end
+    else if (nege_row_en) begin
+        wr_en_add_pre <= 1'b1;
+    end
+    else begin
+       wr_en_add_pre <= wr_en_add_pre; 
+    end
+end
+
+
+//
+always @(posedge clk or negedge rst) begin
+    if (!rst) begin
+        wr_en_add_cnt <= 'd0;
+    end
+    else if (href_count >= 'd718) begin
+        wr_en_add_cnt <= 'd0;
+    end
+    else if (wr_en_add_pre == 1'b1) begin
+        if (wr_en_add_cnt <= 'd500) begin
+            wr_en_add_cnt <= wr_en_add_cnt +1'b1;           
+        end
+        else begin
+            wr_en_add_cnt <= wr_en_add_cnt;
+        end
+    end
+    else begin
+        wr_en_add_cnt <= 'd0;
+    end
+end
+
+
+// 一行抽像素结束补充像素点
+always @(posedge clk or negedge rst) begin
+    if (!rst) begin
+        wr_en_add <= 1'b0 ;
+    end
+    else if (wr_en_add_pre == 1'b0 || wr_en_add_cnt >= pix_add) begin
+         wr_en_add <= 1'b0 ;      
+    end
+    else if (wr_en_add_pre == 1'b1) begin
+        wr_en_add <= 1'b1 ;
+    end
+    else begin
+        wr_en_add <= 1'b0;
+    end
+end
+
+assign wr_data = (wr_en_add_pre) ? 'd0 : rgb565_in ;
 
 
 // 使用 fifo 存储满足两次突发长度的数据，almost_full 为标志信号
 fifo_wr_buf axi_wr_buf(
     .wr_clk         (clk),                // input
     .wr_rst         ((~rst) || (pose_vs_in)),                // input
-    .wr_en          (wr_en_tr),                  // input
+    .wr_en          (wr_en_final || wr_en_add),                  // input
     .wr_data        (wr_data),              // input [15:0]
     .wr_full        (burst_emergency),              // output
     .almost_full    (almost_full),      // output
@@ -223,7 +436,7 @@ fifo_wr_buf axi_wr_buf(
 );
 
 
- //数据准备好条件和信号 ID 
+// 数据准备好条件和信号 ID 
 always @(posedge rd_clk or negedge rst) begin
     if(!rst) begin
         data_out_ready <= 'b0;

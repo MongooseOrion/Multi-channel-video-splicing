@@ -34,6 +34,7 @@ module ddr_rd_buf #(
     input                           rst             ,
     input   [3:0]                   rotate_mode     ,
     input   [3:0]                   mirror_mode     ,
+    input   [3:0]                   scale_mode      ,
     input                           buf_wr_en       /*synthesis PAP_MARK_DEBUG="1"*/,
     input       [DQ_WIDTH*8-1:0]    buf_wr_data     ,
     output reg                      frame_instruct  ,
@@ -66,12 +67,14 @@ reg                 rd_en_d1        ;
 reg                 rd_en_d2        ;
 reg [10:0]          row_count       /*synthesis PAP_MARK_DEBUG="1"*/;
 reg [19:0]          pix_count       ;
-reg [5:0]           wr_addr        /*synthesis PAP_MARK_DEBUG="1"*/ ;
-reg [9:0]           rd_addr        /*synthesis PAP_MARK_DEBUG="1"*/ ;
+reg [5:0]           wr_addr         /*synthesis PAP_MARK_DEBUG="1"*/ ;
+reg [9:0]           rd_addr         /*synthesis PAP_MARK_DEBUG="1"*/ ;
+reg [9:0]           pix_cut         ;
 
 assign rd_data_final = (((rotate_mode == 'd1 || mirror_mode == 'd1) && (mirror_mode != 'd2)) 
-                        && row_count >= 'd180) ? rd_data_ram : rd_data_fifo;
-assign rgb565_out = ((pix_count >= WIDTH_TC) && (row_count >= HEIGHT_QD)) ? 16'd0 : rd_data_final;
+                        && row_count >= HEIGHT_QD) ? rd_data_ram : rd_data_fifo;
+assign rgb565_out = (((pix_count >= WIDTH_TC) && (row_count >= HEIGHT_QD)) 
+                    || (row_count > (H_HEIGHT - 2'd2 - pix_cut))) ? 16'd0 : rd_data_final;
 
 
 // Ö¡Ö¸Ê¾ÐÅºÅ
@@ -241,6 +244,50 @@ always @(posedge rd_clk or negedge rd_rst) begin
     end
     else begin
         de_o <= rd_en;
+    end
+end
+
+
+// 
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        pix_cut <= 'b0;
+    end
+    else if (scale_mode == 'd0) begin
+        pix_cut <= 10'd0;
+    end
+    else if (scale_mode == 'd1) begin  //20³é1£»
+        pix_cut <= 10'd27;     
+    end
+    else if (scale_mode == 'd2) begin  //15³é1£»
+        pix_cut <= 10'd36;      
+    end
+    else if (scale_mode == 'd3) begin  //10³é1£»
+        pix_cut <= 10'd54;
+    end 
+    else if (scale_mode == 'd4) begin  //9³é1£»
+        pix_cut <= 10'd60;  
+    end
+    else if (scale_mode == 'd5) begin  //8³é1£»
+        pix_cut <= 10'd67;      
+    end
+    else if (scale_mode == 'd6) begin  //7³é1£»
+        pix_cut <= 10'd77;      
+    end
+    else if (scale_mode == 'd7) begin  //6³é1£»
+        pix_cut <= 10'd90;
+    end 
+    else if (scale_mode == 'd8) begin  //5³é1£»
+        pix_cut <= 10'd108;    
+    end
+    else if (scale_mode == 'd9) begin  //4³é1£»
+        pix_cut <= 10'd135;    
+    end
+    else if (scale_mode == 'd10) begin  //3³é1£»
+        pix_cut <= 10'd180;   
+    end
+    else begin
+        pix_cut <= pix_cut;
     end
 end
 

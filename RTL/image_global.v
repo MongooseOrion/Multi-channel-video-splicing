@@ -132,6 +132,7 @@ reg         ultimate_vs_in      ;
 reg [15:0]  ultimate_data_in    ;
 reg [3:0]   rotate_mode         ;
 reg [3:0]   mirror_mode         ;
+reg [3:0]   scale_mode          ;
 
 
 // ÕÕÏà»ú 1 1/16
@@ -240,13 +241,32 @@ always @(posedge sys_clk or negedge sys_rst) begin
 end
 
 
+// Ëõ·ÅÄ£Ê½¿ØÖÆ
+always @(posedge sys_clk or negedge sys_rst) begin
+    if(!sys_rst) begin
+        scale_mode <= 'b0;
+    end
+    else if((ctrl_command_in == 4'b0010) && (command_flag == 1'b1)) begin
+        if(value_command_in == 4'd11) begin
+            scale_mode <= 4'd10;
+        end
+        else begin
+            scale_mode <= value_command_in;
+        end
+    end
+    else begin
+        scale_mode <= scale_mode;
+    end
+end
+
+
 // Êä³öÍ¼Ïñ 9/16
 // 960*560
 always @(posedge sys_clk or negedge sys_rst) begin
     if(!sys_rst) begin
         reg_value_command <= 'b0;
     end
-    else if(ctrl_command_in == 4'b1111 && command_flag == 1'b1) begin
+    else if((ctrl_command_in == 4'b1111) && (command_flag == 1'b1)) begin
         reg_value_command <= value_command_in;
     end
     else begin
@@ -301,6 +321,7 @@ video_sampling_2 #(
     .vs_in              (ultimate_vs_in     ),
     .de_in              (ultimate_de_in     ),
     .rgb565_in          (ultimate_data_in   ),
+    .scale_mode         (scale_mode         ),
     .rd_clk             (ddr_clk            ),
     .rd_en              (channel5_rd_en     ),
     .data_out_ready     (channel5_rready    ),
@@ -395,6 +416,7 @@ ddr_rd_buf u_ddr_rd_buf(
     .rst                        (ddr_init       ),
     .rotate_mode                (rotate_mode    ), 
     .mirror_mode                (mirror_mode    ),
+    .scale_mode                 (scale_mode     ),
   
     .frame_instruct             (frame_instruct ), 
     .buf_wr_en                  (buf_wr_en      ),
@@ -439,7 +461,43 @@ end
 
 always @(posedge sys_clk or negedge sys_rst) begin
     if(!sys_rst) begin
-        scale_value <= 'b0;
+        scale_value <= {7'd75,4'd0};
+    end
+    else if(scale_mode == 4'd0) begin
+        scale_value <= {7'd75,4'd0};
+    end
+    else if (scale_mode == 4'd1) begin  //20³é1£»
+        scale_value <= {7'd71,4'd5};       
+    end
+    else if (scale_mode == 4'd2) begin  //15³é1£»
+        scale_value <= {7'd70,4'd0};      
+    end
+    else if (scale_mode == 4'd3) begin  //10³é1£»
+        scale_value <= {7'd67,4'd5};  
+    end 
+    else if (scale_mode == 4'd4) begin  //9³é1£»
+        scale_value <= {7'd66,4'd0};    
+    end
+    else if (scale_mode == 4'd5) begin  //8³é1£»
+        scale_value <= {7'd64,4'd5};      
+    end
+    else if (scale_mode == 4'd6) begin  //7³é1£»
+        scale_value <= {7'd63,4'd0};       
+    end
+    else if (scale_mode == 4'd7) begin  //6³é1£»
+        scale_value <= {7'd61,4'd5}; 
+    end 
+    else if (scale_mode == 4'd8) begin  //5³é1£»
+        scale_value <= {7'd60,4'd5};  
+    end
+    else if (scale_mode == 4'd9) begin  //4³é1£»
+        scale_value <= {7'd56,4'd5};    
+    end
+    else if (scale_mode == 4'd10) begin  //3³é1£»
+        scale_value <= {7'd50,4'd0};   
+    end
+    else if (scale_mode == 4'd11) begin  //2³é1£»
+        scale_value <= {7'd37,4'd5};   
     end
     else begin
         scale_value <= scale_value;
