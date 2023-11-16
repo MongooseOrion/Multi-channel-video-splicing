@@ -10,7 +10,7 @@ parameter color_char  = 24'hff0000       //更改字符颜色
 	input                       pclk,
 	input[23:0]                 wave_color,
 	input                       adc_clk,
-	input                        adc_buf_wr,
+	input                       adc_buf_wr,
 	input[11:0]                 adc_buf_addr,
 	input[7:0]                  adc_buf_data,
 	input                       i_hs,    
@@ -22,7 +22,7 @@ parameter color_char  = 24'hff0000       //更改字符颜色
 	output                      o_de,    
 	output[23:0]                o_data,
     output [10:0]               ram_addr,
-    input  [2:0]                CH,
+    input  [2:0]                channel_index,
     input [7:0]                 i_data_char,
     input [8:0]                 angle,     // 输入的角度数字，3位十进制
     input [10:0]                proportion, // 输入的比例数字，高7位是整数部分，低4位是小数部分
@@ -468,7 +468,7 @@ end
 
 always @(*)begin
     if(region_active3 == 1'b1)
-        osd_ram_addr3_reg = osd_ram_addr3[12:3]+7'd66*CH;
+        osd_ram_addr3_reg = osd_ram_addr3[12:3]+7'd66*channel_index;
     else if(region_active9 == 1'b1)
         osd_ram_addr3_reg = osd_ram_addr3[12:3]+10'd264;   
     else if(region_active5 == 1'b1&&pos_x>=x_start5+12'd0&&pos_x<=x_start5+12'd15)

@@ -34,10 +34,12 @@ module image_global#(
     parameter M_ADDR_WIDTH      = 5'd5             // buf 读通道位宽
 )(
     input               ddr_clk                     /*synthesis PAP_MARK_DEBUG="1"*/,
+    input               sys_clk                     ,
     input               sys_rst                     ,
     input               ddr_init                    /*synthesis PAP_MARK_DEBUG="1"*/,
     input       [3:0]   ctrl_command_in             ,
     input       [3:0]   value_command_in            ,
+    input               command_flag                ,
     
     // 视频流输入
     input               cmos1_pclk                  ,
@@ -63,6 +65,11 @@ module image_global#(
     input                           vesa_out_de     /*synthesis PAP_MARK_DEBUG="1"*/ ,
     output [15:0]                   vesa_out_data   /*synthesis PAP_MARK_DEBUG="1"*/,
     output                          de_out          /*synthesis PAP_MARK_DEBUG="1"*/,
+
+    // 显示字符数据
+    output reg      [2:0]           channel_index   ,
+    output reg      [8:0]           angle_num       ,
+    output reg      [10:0]          scale_num       ,   
     
     // AXI 总线
     output [CTRL_ADDR_WIDTH-1:0]    axi_awaddr      /*synthesis PAP_MARK_DEBUG="1"*/,
@@ -210,8 +217,11 @@ video_sampling_1 #(
 
 // 聚焦视图 9/16
 // 960*560
-always @(*) begin
-    if(ctrl_command_in == 4'b1111) begin
+always @(posedge sys_clk or negedge sys_rst) begin
+    if(!sys_rst) begin
+        reg_value_command <= 'b0;
+    end
+    else if((ctrl_command_in == 4'b1111) && (command_flag == 1'b1)) begin
         if(value_command_in == 4'b0) begin
             reg_value_command <= reg_value_command;
         end
@@ -220,43 +230,47 @@ always @(*) begin
         end
     end
     else begin
-        reg_value_command <= 4'b0;
+        reg_value_command <= reg_value_command;
     end
 end
 
 always @(*) begin
-    case(reg_value_command)
-        CAM_1: begin
-            ultimate_clk_in <= cmos1_pclk;
-            ultimate_vs_in <= cmos1_vsync;
-            ultimate_de_in <= cmos1_href;
-            ultimate_data_in <= cmos1_pix_data;
-        end
-        CAM_2: begin
-            ultimate_clk_in <= cmos2_pclk;
-            ultimate_vs_in <= cmos2_vsync;
-            ultimate_de_in <= cmos2_href;
-            ultimate_data_in <= cmos2_pix_data;
-        end
-        CAM_FUSION: begin
-            ultimate_clk_in <= cmos_fusion_pclk;
-            ultimate_vs_in <= cmos_fusion_vsync;
-            ultimate_de_in <= cmos_fusion_href;
-            ultimate_data_in <= cmos_fusion_data;
-        end
-        HDMI: begin
-            ultimate_clk_in <= hdmi_pclk;
-            ultimate_vs_in <= hdmi_vsync;
-            ultimate_de_in <= hdmi_href;
-            ultimate_data_in <= hdmi_pix_data;
-        end
-        default: begin
-            ultimate_clk_in <= cmos1_pclk;
-            ultimate_vs_in <= cmos1_vsync;
-            ultimate_de_in <= cmos1_href;
-            ultimate_data_in <= cmos1_pix_data;
-        end
-    endcase
+    if(reg_value_command == 4'd0) begin
+        ultimate_clk_in <= cmos1_pclk;
+        ultimate_vs_in <= cmos1_vsync;
+        ultimate_de_in <= cmos1_href;
+        ultimate_data_in <= cmos1_pix_data;
+    end
+    else if(reg_value_command == 4'd1) begin
+        ultimate_clk_in <= cmos1_pclk;
+        ultimate_vs_in <= cmos1_vsync;
+        ultimate_de_in <= cmos1_href;
+        ultimate_data_in <= cmos1_pix_data;
+    end
+    else if(reg_value_command == 4'd2) begin
+        ultimate_clk_in <= cmos2_pclk;
+        ultimate_vs_in <= cmos2_vsync;
+        ultimate_de_in <= cmos2_href;
+        ultimate_data_in <= cmos2_pix_data;
+    end
+    else if(reg_value_command == 4'd3) begin
+        ultimate_clk_in <= cmos_fusion_pclk;
+        ultimate_vs_in <= cmos_fusion_vsync;
+        ultimate_de_in <= cmos_fusion_href;
+        ultimate_data_in <= cmos_fusion_data;
+    end
+    else if(reg_value_command == 4'd4) begin
+        ultimate_clk_in <= hdmi_pclk;
+        ultimate_vs_in <= hdmi_vsync;
+        ultimate_de_in <= hdmi_href;
+        ultimate_data_in <= hdmi_pix_data;
+    end
+    else begin
+        ultimate_clk_in <= ultimate_clk_in;
+        ultimate_vs_in <= ultimate_vs_in;
+        ultimate_de_in <= ultimate_de_in;
+        ultimate_data_in <= ultimate_data_in;
+    end
 end
 
 video_sampling_2 #(
@@ -264,6 +278,9 @@ video_sampling_2 #(
 )video_sampling_ultimate (
     .clk                (ultimate_clk_in    ),
     .rst                (sys_rst            ),
+    //.ctrl_command_in    (ctrl_command_in    ),
+    //.value_command_in   (value_command_in   ),
+    //.command_valid      (command_flag       ),
     .vs_in              (ultimate_vs_in     ),
     .de_in              (ultimate_de_in     ),
     .rgb565_in          (ultimate_data_in   ),
@@ -338,6 +355,9 @@ axi_interconnect_rd u_axi_interconnect_rd(
     .frame_instruct             (frame_instruct ),
     .buf_wr_data                (buf_wr_data),
     .buf_wr_en                  (buf_wr_en),
+    .value_command_in           (value_command_in),
+    .ctrl_command_in            (ctrl_command_in),
+    .command_flag               (command_flag),
 
     .axi_arvalid                (axi_arvalid ),
     .axi_arready                (axi_arready ),
@@ -359,6 +379,10 @@ ddr_rd_buf u_ddr_rd_buf(
     .clk                        (ddr_clk        ), 
     .rst                        (ddr_init       ),  
     .frame_instruct             (frame_instruct ), 
+    .value_command_in           (value_command_in),
+    .ctrl_command_in            (ctrl_command_in),
+    .command_flag               (command_flag),
+
     .buf_wr_en                  (buf_wr_en      ),
     .buf_wr_data                (buf_wr_data    ),
     .rd_clk                     (vesa_out_clk   ), 
@@ -369,5 +393,39 @@ ddr_rd_buf u_ddr_rd_buf(
     .rgb565_out                 (vesa_out_data  )
 );
 
+
+// 显示数据赋值
+always @(posedge sys_clk or negedge sys_rst) begin
+    if(!sys_rst) begin
+        channel_index <= 'b0;
+    end
+    else begin
+        channel_index <= reg_value_command;
+    end
+end
+
+always @(posedge sys_clk or negedge sys_rst) begin
+    if(!sys_rst) begin
+        angle_num <= 'b0;
+    end
+    else if((ctrl_command_in == 4'b0011) && (value_command_in == 4'b0001)) begin
+        angle_num <= 9'd180;
+    end
+    else if((ctrl_command_in == 4'b0011) && (value_command_in == 4'd0)) begin
+        angle_num <= 9'd0;
+    end
+    else begin
+        angle_num <= angle_num;
+    end
+end
+
+always @(posedge sys_clk or negedge sys_rst) begin
+    if(!sys_rst) begin
+        scale_num <= 'b0;
+    end
+    else begin
+        scale_num <= scale_num;
+    end
+end
 
 endmodule

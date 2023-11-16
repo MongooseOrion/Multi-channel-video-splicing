@@ -37,6 +37,10 @@ module ddr_rd_buf #(
     input       [DQ_WIDTH*8-1:0]    buf_wr_data     ,
     output reg                      frame_instruct  ,
 
+    input       [3:0]               ctrl_command_in ,
+    input       [3:0]               value_command_in,
+    input                           command_flag    ,
+
     input                           rd_clk          ,
     input                           rd_rst          ,
     input                           rd_en           ,
@@ -52,9 +56,11 @@ parameter HEIGHT_TC = (H_HEIGHT / 4) * 3;
 
 wire                nege_href       ;
 wire                pose_vsync      ;
-wire [15:0]         rd_data         ;
+wire [15:0]         rd_data_fifo    ;
+wire                rd_data_final   ;
 
-
+reg [3:0]           rotate_mode     ;
+reg [3:0]           mirror_mode     ;
 reg                 rd_fsync_d1     ;
 reg                 rd_fsync_d2     ;
 reg [2:0]           frame_count     ;
@@ -62,6 +68,37 @@ reg                 rd_en_d1        ;
 reg                 rd_en_d2        ;
 reg [10:0]          row_count       /*synthesis PAP_MARK_DEBUG="1"*/;
 reg [19:0]          pix_count       ;
+reg [5:0]           wr_addr         ;
+reg [9:0]           rd_addr         ;
+
+
+// 模式控制
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        rotate_mode <= 'b0;
+        mirror_mode <= 'b0;
+    end
+    else if((ctrl_command_in == 4'b0100) && (command_flag == 1'b1)) begin
+        if (value_command_in == 'd2) begin   //切换到水平镜像时，先旋转180°
+            mirror_mode <= 4'd2; 
+            rotate_mode <= 4'd1;
+        end
+        else if (value_command_in == 4'd0) begin
+            mirror_mode <= 4'd0;
+            rotate_mode <= 4'd0;            
+        end
+        else begin
+            mirror_mode <= value_command_in;
+            rotate_mode <= rotate_mode;
+        end
+    end
+    else begin
+        mirror_mode <= mirror_mode;
+        rotate_mode <= rotate_mode;        
+    end
+end
+
+
 // 帧指示信号
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
@@ -73,7 +110,7 @@ always @(posedge clk or negedge rst) begin
         rd_fsync_d2 <= rd_fsync_d1;
     end
 end
-assign pose_vsync = ((rd_fsync_d1) && (rd_fsync_d2)) ? 1'b1 : 1'b0;
+assign pose_vsync = ((rd_fsync_d1) && (~rd_fsync_d2)) ? 1'b1 : 1'b0;
 
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
@@ -108,6 +145,7 @@ always @(posedge clk or negedge rst) begin
 end
 
 
+// 正向存储
 fifo_rd_buf rd_buf(
     .wr_clk         (clk),                // input
     .wr_rst         ((~rst) || (pose_vsync) || (nege_href)),                // input
@@ -118,12 +156,62 @@ fifo_rd_buf rd_buf(
     .rd_clk         (rd_clk),                // input
     .rd_rst         ((~rst) || (pose_vsync) || (nege_href)),                // input,每一行读完后，fifo复位
     .rd_en          (rd_en),                  // input
-    .rd_data        (rd_data),              // output [15:0]
+    .rd_data        (rd_data_fifo),              // output [15:0]
     .rd_empty       (),            // output
     .almost_empty   ()     // output
 );
 
-assign rgb565_out = ((pix_count >= WIDTH_TC) && (row_count >= HEIGHT_QD)) ? 16'd0 : rd_data;
+// 数据信号
+assign rgb565_out = ((pix_count >= WIDTH_TC) && (row_count >= HEIGHT_QD)) ? 16'd0 : rd_data_final;
+
+
+// 反向存储
+ram_rd_buf  reverse_rd_buf(
+  .wr_data      (buf_wr_data),    // input [255:0]
+  .wr_addr      (wr_addr),    // input [5:0]
+  .wr_en        (buf_wr_en),        // input
+  .wr_clk       (clk),      // input
+  .wr_rst       ((~rst) || (pose_vsync) || (nege_href)),      // input
+  .rd_addr      (rd_addr),    // input [9:0]
+  .rd_data      (rd_data_ram),    // output [15:0]
+  .rd_clk       (rd_clk),      // input
+  .rd_rst       ((~rst) || (pose_vsync) || (nege_href))       // input
+);
+
+
+// 反向存储的内部连线
+assign rd_data_final = (((rotate_mode == 4'd1 || mirror_mode == 4'd1) &&(mirror_mode != 'd2))
+                        && (row_count >= 'd180)) ? rd_data_ram : rd_data_fifo;
+
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        wr_addr <= 'd0;
+    end
+    else if((pose_vsync) || (nege_href)) begin   //每次写入一行前写地址清零
+        wr_addr <= 'd0;
+    end
+    else if(buf_wr_en) begin
+        wr_addr <= wr_addr + 1'b1;
+    end
+    else begin
+        wr_addr <= wr_addr;
+    end
+end
+
+always @(posedge rd_clk or negedge rst) begin
+    if(!rst) begin
+        rd_addr <= 'd0;
+    end
+    else if((pose_vsync) || (nege_href)) begin //读一行之前地址跳到959
+        rd_addr <= WIDTH_TC - 1'b1 ;
+    end
+    else if(rd_en == 1'b1) begin
+        rd_addr <= rd_addr - 1'b1 ;
+    end
+    else begin
+        rd_addr <= rd_addr;
+    end
+end
 
 
 // 行像素计数
@@ -141,6 +229,7 @@ always @(posedge rd_clk or negedge rd_rst) begin
         pix_count <= pix_count;
     end
 end
+
 
 // 读使能（行有效）下降沿
 always @(posedge rd_clk or negedge rd_rst) begin

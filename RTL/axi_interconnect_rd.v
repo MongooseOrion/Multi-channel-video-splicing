@@ -37,6 +37,9 @@ module axi_interconnect_rd #(
 )(
     input                               clk             ,
     input                               rst             ,
+    input       [3:0]                   ctrl_command_in ,
+    input       [3:0]                   value_command_in,
+    input                               command_flag    ,
 
     // hdmi 时序相关信号
     input                               hdmi_vsync      ,
@@ -100,6 +103,7 @@ reg                             reg_axi_rready  ;
 reg [DQ_WIDTH*8-1:0]            reg_axi_rdata   ;
 reg                             processing_wait ;
 
+reg [3:0]                       rotate_mode         ;
 reg                             reg_vsync_d1        ;
 reg                             reg_vsync_d2        ;
 reg                             reg_href_d1         ;
@@ -112,6 +116,7 @@ reg [15:0]                      reg_axi_araddr_2    ;
 reg [15:0]                      reg_axi_araddr_3    ;
 reg [15:0]                      reg_axi_araddr_4    ;
 reg [19:0]                      reg_axi_araddr_5    ;
+reg [3:0]                       addr_cnt            ;
 reg                             row_end_flag        ;
 reg [10:0]                      row_count_1         ;
 reg [10:0]                      row_count_2         ;
@@ -127,6 +132,20 @@ assign axi_rready   = 1'b1                  ;
 assign pose_vsync = ((reg_vsync_d1) && (~reg_vsync_d2)) ? 1'b1 : 1'b0;
 assign nege_vsync = ((~reg_vsync_d1) && (reg_vsync_d2)) ? 1'b1 : 1'b0;
 assign nege_href = ((~reg_href_d1) && (reg_href_d2)) ? 1'b1 : 1'b0;
+
+
+// 旋转模式
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        rotate_mode <= 'b0;
+    end
+    else if((ctrl_command_in == 4'b0011) && (command_flag == 1'b1)) begin
+        rotate_mode <= value_command_in;
+    end
+    else begin
+        rotate_mode <= rotate_mode;
+    end
+end
 
 
 // 延迟时钟周期，跨时钟信号应延迟两个周期，确保基于它们创建的任何信号符合时序要求
@@ -155,7 +174,8 @@ always @(posedge clk or negedge rst) begin
         axi_rd_en <= 1'b1;
     end
     else if((((reg_axi_araddr_4 + ADDR_STEP) % (WIDTH_QD / 2) == 'b0) 
-            || ((reg_axi_araddr_5 + ADDR_STEP) % (WIDTH_TC / 2) == 'b0)) 
+            || (((reg_axi_araddr_5 + ADDR_STEP) % (WIDTH_TC / 2) == 'b0) && rotate_mode == 'd0) 
+            || ((((reg_axi_araddr_5 - ADDR_STEP) % (WIDTH_TC / 2) == 'b0) && rotate_mode == 'd1) || (reg_axi_araddr_5 == 'd0 && addr_cnt == 'd5))) 
             && ((axi_arvalid == 1'b1) && (axi_arready == 1'b1))) begin
         axi_rd_en <= 1'b0;
     end
@@ -248,13 +268,18 @@ always @(posedge clk or negedge rst) begin
             WR5_ADDR: begin
                 if(((reg_axi_araddr_5 + ADDR_STEP) % (WIDTH_TC / 2) == 'b0) 
                     && ((axi_arvalid == 1'b1) && (axi_arready == 1'b1))
-                    && (processing_wait == 1'b0)) begin
+                    && (processing_wait == 1'b0) && (rotate_mode == 'd0)) begin
                     if(reg_axi_araddr_5 == (WIDTH_TC * HEIGHT_TC / 2)-ADDR_STEP) begin
                         addr_state <= INIT_WAIT;
                     end
                     else begin
-                        addr_state <= WR5_ADDR;
+                        addr_state <= WR5_PRE;
                     end
+                end
+                else if((((reg_axi_araddr_5 - ADDR_STEP) % (WIDTH_TC / 2) == 'b0) 
+                    && ((axi_arvalid == 1'b1) && (axi_arready == 1'b1))
+                    && (processing_wait == 1'b0) && (rotate_mode == 'd1)) || ((reg_axi_araddr_5 == 'd0 && addr_cnt == 'd5) && (axi_arvalid == 1'b1) && (axi_arready == 1'b1))) begin
+                    addr_state <= WR5_PRE;
                 end
                 else begin
                     addr_state <= addr_state;
@@ -270,6 +295,7 @@ always @(posedge clk or negedge rst) begin
     end
 end
 
+
 // 状态机内部信号
 always @(posedge clk or negedge rst) begin
     if(!rst) begin 
@@ -281,6 +307,7 @@ always @(posedge clk or negedge rst) begin
         reg_axi_araddr_5 <= 'b0;
         reg_axi_arvalid <= 'b0;
         row_end_flag <= 'b0;
+        addr_cnt <= 'b0;
     end
     else if(pose_vsync == 1'b1) begin
         reg_axi_araddr_1 <= 'b0;
@@ -389,11 +416,31 @@ always @(posedge clk or negedge rst) begin
             end
             WR5_ADDR: begin
                 if((axi_arvalid == 1'b1) && (axi_arready == 1'b1)) begin
-                    if ((reg_axi_araddr_5 + ADDR_STEP) % (WIDTH_TC / 2) == 'b0) begin
+                    if (rotate_mode == 'd0) begin
+                        reg_axi_araddr <= reg_axi_araddr + ADDR_STEP;
+                        reg_axi_araddr_5 <= reg_axi_araddr_5 + ADDR_STEP;
+                    end
+                    else begin
+                        if (addr_cnt == 'd5) begin
+                            addr_cnt <= 'd0;
+                        end
+                        else begin
+                            addr_cnt <= addr_cnt + 1'b1;
+                        end
+                        reg_axi_araddr <= reg_axi_araddr + ADDR_STEP;
+                        if (reg_axi_araddr_5 == 'd0) begin
+                            reg_axi_araddr_5 <= reg_axi_araddr_5 ;
+                        end
+                        else begin
+                            reg_axi_araddr_5 <= reg_axi_araddr_5 - ADDR_STEP;
+                        end
+                    end
+                    if (((reg_axi_araddr_5 + ADDR_STEP) % (WIDTH_TC / 2) == 'b0) && rotate_mode == 'd0) begin
                         reg_axi_arvalid <= 1'b0;
                     end
-                    reg_axi_araddr <= reg_axi_araddr + ADDR_STEP;
-                    reg_axi_araddr_5 <= reg_axi_araddr_5 + ADDR_STEP;
+                    else if((((reg_axi_araddr_5 - ADDR_STEP) % (WIDTH_TC / 2) == 'b0) && rotate_mode == 'd1) || (reg_axi_araddr_5 == 'd0 && addr_cnt == 'd5)) begin
+                        reg_axi_arvalid <= 1'b0;
+                    end
                 end
                 else begin
                     reg_axi_araddr <= reg_axi_araddr;
@@ -410,6 +457,7 @@ always @(posedge clk or negedge rst) begin
                 reg_axi_araddr_5 <= reg_axi_araddr_5;
                 reg_axi_arvalid <= reg_axi_arvalid;
                 row_end_flag <= row_end_flag;
+                addr_cnt <= addr_cnt;
             end
         endcase
     end

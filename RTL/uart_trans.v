@@ -26,14 +26,15 @@
 // UART 指令控制模块
 // 
 module uart_trans(
-    input           clk,
-    input           rst,  
-    input           uart_rx,
-    input   [7:0]   command_in, 
-    input           command_in_flag,  
-    output          uart_tx,
-    output  [3:0]   ctrl_command_out,
-    output  [3:0]   value_command_out
+    input               clk,
+    input               rst,  
+    input               uart_rx,
+    input       [7:0]   command_in, 
+    input               command_in_flag,  
+    output              uart_tx,
+    output      [3:0]   ctrl_command_out,
+    output      [3:0]   value_command_out,
+    output reg          data_ready
 );
 
 wire            data_out_flag;
@@ -41,6 +42,8 @@ wire [7:0]      command_out;
 
 reg [3:0]       reg_ctrl_command;
 reg [3:0]       reg_value_command;
+reg [3:0]       reg_ctrl_command_d1;
+reg [3:0]       reg_value_command_d1;
 
 assign ctrl_command_out = reg_ctrl_command;
 assign value_command_out = reg_value_command;
@@ -60,15 +63,30 @@ uart_rx command_recv(
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
         reg_ctrl_command <= 'b0;
+        reg_ctrl_command_d1 <= 'b0;
         reg_value_command <= 'b0;
+        reg_value_command_d1 <= 'b0;
     end
     else if(data_out_flag) begin
         reg_ctrl_command <= command_out[7:4];
+        reg_ctrl_command_d1 <= reg_ctrl_command;
         reg_value_command <= command_out[3:0];
+        reg_value_command_d1 <= reg_value_command;
     end
     else begin
         reg_ctrl_command <= reg_ctrl_command;
+        reg_ctrl_command_d1 <= reg_ctrl_command;
         reg_value_command <= 4'b0;
+        reg_value_command_d1 <= reg_value_command;
+    end
+end
+
+always @(posedge clk or negedge rst) begin
+    if(!rst) begin
+        data_ready <= 'b0;
+    end
+    else begin
+        data_ready <= data_out_flag;
     end
 end
 

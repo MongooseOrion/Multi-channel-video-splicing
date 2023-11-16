@@ -60,13 +60,14 @@ wire        almost_full;
 
 reg                             vs_in_d1        ; 
 reg                             de_in_d1        ; 
-reg [10:0]                       href_count       /*synthesis PAP_MARK_DEBUG="1"*/; 
+reg [10:0]                      href_count       /*synthesis PAP_MARK_DEBUG="1"*/; 
 reg [3:0]                       pix_count        /*synthesis PAP_MARK_DEBUG="1"*/;
 reg                             wr_en_tr       /*synthesis PAP_MARK_DEBUG="1"*/ ;     
 reg [15:0]                      wr_data_temp    ;
 reg [15:0]                      wr_data         /*synthesis PAP_MARK_DEBUG="1"*/;
 reg [10:0]                      row_pix_count;
 reg                             pre_en /*synthesis PAP_MARK_DEBUG="1"*/;
+
 
 // 写入有效的像素个数计数
 always @(posedge clk or negedge rst) begin
@@ -83,7 +84,9 @@ always @(posedge clk or negedge rst) begin
         row_pix_count <= row_pix_count;
     end
 end
-//每帧图像预读一个256位的数据使能，在读时钟下
+
+
+// 每帧图像预读一个256位的数据使能，在读时钟下
 always @(posedge rd_clk or negedge rst) begin
     if(!rst) begin
         pre_en <= 'b0;
@@ -95,6 +98,8 @@ always @(posedge rd_clk or negedge rst) begin
         pre_en <= 1'b0;
     end
 end
+
+
 // 帧有效信号，确保数据按帧顺序存储
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
@@ -106,7 +111,6 @@ always @(posedge clk or negedge rst) begin
 end
 assign pose_vs_in = ((vs_in) && (~vs_in_d1)) ? 1'b1 : 1'b0;
 assign nege_vs_in = ((~vs_in) && (vs_in_d1)) ? 1'b1 : 1'b0;
-
 
 
 // 行计数和抽样，间隔 3 行
@@ -138,7 +142,6 @@ end
 
 
 // 满足行抽取要求的使能信号
-
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
         wr_en_2 <= 'b0;
@@ -149,8 +152,8 @@ always @(posedge clk or negedge rst) begin
     else begin
         wr_en_2 <= de_in;
     end
-
 end
+
 
 // 每四个像素丢一个
 always @(posedge clk or negedge rst) begin
@@ -172,12 +175,9 @@ always @(posedge clk or negedge rst) begin
         pix_count <= 4'b0;
     end
 end
-    
-
 
 
 // 最终的写使能信号
-
 always @(posedge clk or negedge rst) begin
     if(!rst) begin
         wr_en_tr <= 'b0;
@@ -189,7 +189,6 @@ always @(posedge clk or negedge rst) begin
         wr_en_tr <= 1'b0;
     end
 end
-
 
 
 // 写数据信号
@@ -208,14 +207,14 @@ end
 // 使用 fifo 存储满足两次突发长度的数据，almost_full 为标志信号
 fifo_wr_buf axi_wr_buf(
     .wr_clk         (clk),                // input
-    .wr_rst         (~rst|pose_vs_in),                // input
-    .wr_en          (wr_en_tr ),                  // input
+    .wr_rst         ((~rst) || (pose_vs_in)),                // input
+    .wr_en          (wr_en_tr),                  // input
     .wr_data        (wr_data),              // input [15:0]
     .wr_full        (burst_emergency),              // output
     .almost_full    (almost_full),      // output
     .rd_clk         (rd_clk),                // input
-    .rd_rst         (~rst|pose_vs_in),                // input
-    .rd_en          (rd_en | pre_en),                  // input
+    .rd_rst         ((~rst) || (pose_vs_in)),                // input
+    .rd_en          ((rd_en) || (pre_en)),                  // input
     .rd_data        (rd_data),              // output [255:0]
     .rd_empty       (),            // output
     .almost_empty   ()     // output

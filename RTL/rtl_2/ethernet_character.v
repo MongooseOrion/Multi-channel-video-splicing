@@ -34,6 +34,12 @@ module ethernet_character(
     input						video_hsync	    ,
     input   					video_href      ,
     input 		[15:0]			video_data_in   ,
+
+    // 输入数据
+    input       [2:0]           channel_index   ,
+    input       [8:0]           angle_num       ,
+    input       [10:0]          scale_num       ,           
+
     // HDMI 图像信号输出
     output  					hdmi_vsync      ,
     output  					hdmi_hsync      ,
@@ -88,10 +94,10 @@ osd_display #(
     .o_data                (osd_data                    ),
     .ram_addr              (udp_rec_ram_read_addr       ), //output，输出读取ram的地址
     .udp_rec_data_valid    (udp_rec_data_valid          ),
-    .CH                    (3'd2                        ), //当前使用的通道
+    .channel_index         (channel_index               ), //当前使用的通道
     .i_data_char           (udp_rec_ram_rdata           ),                            
-    .angle                 (9'd88                       ),     //总共9位，输入的角度值，3位十进制              
-    .proportion            (11'd88                      )      //总共11位，输入的比例值，高7位是整数部分，低4位是小数部分 
+    .angle                 (angle_num                   ),     //总共9位，输入的角度值，3位十进制              
+    .proportion            (scale_num                   )      //总共11位，输入的比例值，高7位是整数部分，低4位是小数部分 
 );
 
 

@@ -38,7 +38,6 @@ module image_process #(
     input      	[2:0]          			key_out,
     input       [3:0]                   ctrl_command_in,   	// 控制信道
     input       [3:0]                   value_command_in,   // 数据通道
-    input                               frame_wr_done,
     // 读通道
     // 这是主设备
     output reg 							rd_valid,           // 读请求
@@ -56,30 +55,22 @@ module image_process #(
     input 								wr_burst_finish,    // 写完成
 
     output reg							image_addr_flag,
-    output                              frame_process_done,
-    output reg                          init_done,
     output reg	[4:0]					function_mode,
     output reg	[15:0]					display_number,
+    output reg	[10:0]   				color_threshold,          // 二值化阈值
     output reg 							error
 );
 
 // 读写操作状态机参数
 parameter   IDLE = 3'd0,
-            READY = 3'd1,
-            MEM_READ = 3'd2,
-            MEM_WRITE = 3'd3;
+            MEM_READ = 3'd1,
+            MEM_WRITE = 3'd2;
 // 显示功能模式状态机参数
 parameter   DEFAULT_MODE = 5'd0,
             ROTATE_MODE = 5'd1,
             X_SHIFT_MODE = 5'd2,
             Y_SHIFT_MODE = 5'd3,
             SCALE_MODE = 5'd4;
-// 读写基地址
-parameter FRAME_ADDR = 'd260_000;
-parameter RD_BASE_ADDR_1 = 'd240_000;
-parameter RD_BASE_ADDR_2 = 'd240_000 + FRAME_ADDR;
-parameter WR_BASE_ADDR_1 = RD_BASE_ADDR_2 + FRAME_ADDR;
-parameter WR_BASE_ADDR_2 = WR_BASE_ADDR_1 + FRAME_ADDR;
 
 parameter IMAGE_SIZE = VIDEO_HEIGHT * VIDEO_WIDTH;
 
@@ -105,8 +96,6 @@ reg [3:0]	                scale_value;
 reg	[10:0]	                angle;
 reg	[31:0]	                wr_burst_addr_start;
 reg	[31:0]	                rd_burst_addr_start;
-reg                         image_addr_flag_d1;
-reg                         image_addr_flag_d2;
 
 assign wr_data = wr_data_reg;
 assign x_cnt = write_read_len[9:0];
@@ -342,6 +331,8 @@ begin
             display_number 	<= 	y_shift_cnt;
         4	:	
             display_number 	<=  scale_value;
+        6    :    
+            display_number 	<=  color_threshold;
         default:	
             display_number 	<= 0;		
     endcase
@@ -363,45 +354,50 @@ coor_trans coor_trans_inst (
 );
 
 
+
+
 always@(posedge clk or negedge rst) begin
     if(!rst)
-        wr_burst_addr_start	<= WR_BASE_ADDR_1 ;
-    else if(image_addr_flag)					//image_addr_flag==1
-        wr_burst_addr_start	<= WR_BASE_ADDR_2 ;
+        wr_burst_addr_start	<= 32'd6220800 ;
+    else if( image_addr_flag )					//image_addr_flag==1
+        wr_burst_addr_start	<= 32'd4147200 ;
     else	
-        wr_burst_addr_start	<= WR_BASE_ADDR_1;		//image_addr_flag==0
+        wr_burst_addr_start	<= 32'd6220800;		//image_addr_flag==0
 end
 
 always@(posedge clk or negedge rst)
 begin
     if(!rst)
-        rd_burst_addr_start	<= RD_BASE_ADDR_1;
-    else if(image_addr_flag)					//image_addr_flag==1
-        rd_burst_addr_start	<= RD_BASE_ADDR_2;
+        rd_burst_addr_start	<= 32'd2073600;
+    else if( image_addr_flag )					//image_addr_flag==1
+        rd_burst_addr_start	<= 32'd0  ;
     else	
-        rd_burst_addr_start	<= RD_BASE_ADDR_1;		//image_addr_flag==0
+        rd_burst_addr_start	<= 32'd2073600;		//image_addr_flag==0
 end
 
 
 always@(posedge clk or negedge rst) begin
     if(!rst) begin
-        angle <= 'b0;
-        state <= IDLE;
-        i_en <=	1'b1;
-        image_addr_flag	<= 1'b0;
-        wr_valid <= 1'b0;
-        rd_valid <= 1'b0;
-        rd_burst_len <= BURST_LEN;
-        wr_burst_len <= BURST_LEN;
+        angle                <=    'b0;
+        state 				<= IDLE;
+        i_en				<=	1'b1;
+        image_addr_flag		<=	1'b0;
+        
+        wr_valid 		<= 1'b0;
+        rd_valid 		<= 1'b0;
+        
+        rd_burst_len 		<= BURST_LEN;
+        wr_burst_len 		<= BURST_LEN;
+        
         wr_addr 		<='h000000;
         write_read_len 		<= 32'd0;
     end
     else if( write_read_len == IMAGE_SIZE ) begin
-        angle <= angle_temp;
-        i_en <=	1'b0;
-        state <= IDLE;
-        write_read_len <= 32'd0;
-        image_addr_flag	<= ~image_addr_flag;	
+        angle	<=		angle_temp;
+        i_en			<=	1'b0;
+        state			<=	IDLE;
+        write_read_len	<= 	32'd0;
+        image_addr_flag	<=	~image_addr_flag;	
         wr_valid 	<=	1'b0;
         rd_valid 	<=	1'b0;		
         wr_addr 	<=	32'd2073600;      
@@ -409,35 +405,25 @@ always@(posedge clk or negedge rst) begin
     else begin
         case(state)
             IDLE: begin
-                if(frame_wr_done) begin
-                    state <= READY;
-                end
-                else if(frame_process_done) begin
-                    state <= IDLE;
-                end
-                else begin
-                    state <= state;
-                end
-            end
-            READY: begin
-                i_en <=	1'b0;
-                state <= MEM_READ;
-                rd_valid <= 1'b1;
+                i_en			<=	1'b0;
+                state 			<= 	MEM_READ;
+                rd_valid 	<= 	1'b1;
             end
             MEM_READ: begin
                 if(rd_burst_finish) begin
-                    state <= MEM_WRITE;					
-                    rd_valid <= 1'b0;				
-                    wr_valid <=	1'b1;		
-                    wr_addr <= wr_burst_addr_start + x_cnt + VIDEO_WIDTH*y_cnt;
+                    state 			<= 	MEM_WRITE;					
+                    rd_valid 	<= 	1'b0;				
+                    wr_valid 	<=	1'b1;		
+                    wr_addr 	<= 	wr_burst_addr_start  +	x_cnt	+	VIDEO_WIDTH*y_cnt;
                 end
             end
             MEM_WRITE: begin
-                if(wr_burst_finish) begin
-                    state <= READY;
-                    wr_valid <=	1'b0;
-                    write_read_len <= write_read_len + 1'b1;
-                    i_en <= 1'b1;
+                if(wr_burst_finish)
+                begin
+                    state 			<=	IDLE;
+                    wr_valid 	<=	1'b0;
+                    write_read_len 	<= write_read_len +	1'b1;
+                    i_en			<=	1'b1;
                 end
             end
             default: state <= IDLE;
@@ -445,33 +431,5 @@ always@(posedge clk or negedge rst) begin
     end
 end
 
-
-// 输出处理完成信号
-// 读为低，写为高，所以一帧处理完成应该是它的下降沿
-always @(posedge clk or negedge rst) begin
-    if(!rst) begin
-        image_addr_flag_d1 <= 'b0;
-        image_addr_flag_d2 <= 'b0;
-    end
-    else begin
-        image_addr_flag_d1 <= image_addr_flag;
-        image_addr_flag_d2 <= image_addr_flag_d1;
-    end
-end
-assign frame_process_done = ((~image_addr_flag_d1) && (image_addr_flag_d2)) ? 1'b1 : 1'b0;
-
-
-// 初始化成功
-always @(posedge clk or negedge rst) begin
-    if(!rst) begin
-        init_done <= 'b0;
-    end
-    else if(write_read_len == IMAGE_SIZE) begin
-        init_done <= 1'b1;
-    end
-    else begin
-        init_done <= init_done;
-    end
-end
 
 endmodule
