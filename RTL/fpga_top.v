@@ -37,8 +37,7 @@ module fpga_top#(
 )(
     input                                   sys_clk         ,   // 50MHz
     input                                   sys_rst         ,   // 低电平复位
-    // OV5640
-    output      [1:0]                       cmos_init_done  ,   // LED_3, LED_4
+    
     // Cam1	
     inout                                   cmos1_scl       ,   // cmos1 i2c 
     inout                                   cmos1_sda       ,   // cmos1 i2c 
@@ -71,15 +70,12 @@ module fpga_top#(
     inout       [MEM_DQ_WIDTH/8-1:0]        mem_dqs_n       ,
     inout       [MEM_DQ_WIDTH-1:0]          mem_dq          ,
     output      [MEM_DQ_WIDTH/8-1:0]        mem_dm          ,
-    output reg                              heart_beat_led  ,   // LED_5
-    output                                  ddr_init_done   /*synthesis PAP_MARK_DEBUG="1"*/,   // LED_2
     // MS72xx
     output                                  rstn_out        ,
     output                                  iic_tx_scl      ,   // HDMI_OUT
     inout                                   iic_tx_sda      ,
     output                                  iic_scl         ,   // HDMI_IN
     inout                                   iic_sda         , 
-    output                                  hdmi_int_led    ,   // LED_1
     // HDMI_IN
     input                                   pix_clk_in      ,                  
     input                                   vs_in           , 
@@ -105,13 +101,14 @@ module fpga_top#(
     input                                   rgmii_rxc       ,//125Mhz ethernet rgmii RX clock
     // UART
     input                                   uart_rx         ,
-    output                                  uart_tx
+    output                                  uart_tx         ,
+    // 初始化成功
+    output reg                              hardware_init_done,
+    output reg                              process_init_done
 );
 
 // 初始化 DDR
 parameter CTRL_ADDR_WIDTH = MEM_ROW_ADDR_WIDTH + MEM_BADDR_WIDTH + MEM_COL_ADDR_WIDTH;//28
-parameter TH_1S = 27'd33000000; // 心跳 LED 灯计数
-
 
 wire                        cfg_clk             ;
 wire                        clk_25M             ;
@@ -141,17 +138,12 @@ wire                        hdmi_vs_out         ;
 wire                        hdmi_de_out         ;
 wire [15:0]                 rgb565_hdmi         ;
 wire [15:0]                 i_rgb565            ;
-wire [15:0]                 o_rgb565            ;
-wire [23:0]                 rgb888_o            ;
 wire                        pclk_in_buf         ;    
 wire                        vs_in_buf           ;
 wire                        de_in_buf           ;
 wire [15:0]                 rgb565_1            ;
 wire [15:0]                 rgb565_2            ;
 wire                        de_re               /*synthesis PAP_MARK_DEBUG="1"*/;
-wire                        de_o                ;
-wire                        hs_o                ;
-wire                        vs_o                ;
 wire                        init_done           ;
 wire                        vsync_post_1        ;
 wire                        hsync_post_1        ;
@@ -160,10 +152,17 @@ wire [15:0]                 rgb565_post_1       ;
 wire                        vsync_post_2        ;
 wire                        hsync_post_2        ;
 wire                        href_post_2         ;
-wire [15:0]                 rgb888_post_2       ;
+wire [23:0]                 rgb888_post_2       ;
+wire                        vsync_final         ;
+wire                        hsync_final         ;
+wire                        href_final          ;
+wire [23:0]                 rgb888_final        ;
 wire [2:0]                  channel_index       ;
-wire [8:0]                  angle_num           ;     
-wire [10:0]                 scale_num           ; 
+wire [8:0]                  angle_num           ;           
+wire [10:0]                 scale_value         ; 
+wire [1:0]                  cmos_init_done      ;
+wire                        hdmi_init_done      ;
+wire                        ddr_init_done       ;     
 
 reg  [15:0]                 rstn_1ms            ;
 reg                         cmos1_href_d0       ;
@@ -172,7 +171,6 @@ reg  [7:0]                  cmos1_d_d0          ;
 reg  [7:0]                  cmos2_d_d0          ;
 reg                         cmos2_href_d0       ;
 reg                         cmos2_vsync_d0      ;
-
 
 //axi bus   
 wire [CTRL_ADDR_WIDTH-1:0]  axi_awaddr          ;
@@ -196,9 +194,6 @@ wire [MEM_DQ_WIDTH*8-1:0]   axi_rdata           ;
 wire                        axi_rvalid          ;
 wire [3:0]                  axi_rid             ;
 wire                        axi_rlast           ;
-reg  [26:0]                 cnt                 ;
-reg  [15:0]                 cnt_1               ;
-
 
 //
 // PLL
@@ -225,7 +220,7 @@ uart_trans command_ctrl(
     .command_in_flag        (command_in_flag),
     .ctrl_command_out       (ctrl_command ),
     .value_command_out      (value_command),
-    .data_ready             (command_out_flag)
+    .command_out_flag       (command_in_flag)
 );
 
 
@@ -241,7 +236,7 @@ ms72xx_ctl ms72xx_ctl(
     .iic_scl         (iic_scl), 
     .iic_sda         (iic_sda) 
 );
-assign hdmi_int_led = init_over_tx; 
+assign    hdmi_init_done    =    init_over_tx; 
 
 always @(posedge cfg_clk) begin
     if(!locked) begin
@@ -262,7 +257,7 @@ assign rstn_out = (rstn_1ms == 16'h2710);
 // 配置 CMOS
 // OV5640 寄存器功能配置   
 power_on_delay	power_on_delay_inst(
-    .clk_50M                 (clk_50M),
+    .clk_50M                 (sys_clk),
     .reset_n                 (1'b1),	
     .camera1_rstn            (cmos1_reset),
     .camera2_rstn            (cmos2_reset),	
@@ -377,13 +372,17 @@ hdmi_data_in u_hdmi_data_in(
 //
 // 图像数据多路载入
 image_global multi_image_load(
-    .ddr_clk                (core_clk),
     .sys_clk                (clk_50M),
+    .ddr_clk                (core_clk),
     .sys_rst                (sys_rst),
-    .ddr_init               (ddr_init_done),
-    .ctrl_command_in        (ctrl_command),
-    .value_command_in       (value_command),
-    .command_flag           (command_out_flag   ),
+    .ddr_init               (ddr_init_done  ),
+    .ctrl_command_in        (ctrl_command   ),
+    .value_command_in       (value_command  ),
+    .command_flag           (command_in_flag  ),
+
+    .channel_index          (channel_index  ),
+    .scale_value            (scale_value    ),
+    .angle_num              (angle_num      ),
 
     .cmos1_pclk             (cmos1_pclk_16bit   ),
     .cmos1_href             (cmos1_href_16bit   ),
@@ -407,10 +406,6 @@ image_global multi_image_load(
     .vesa_out_de            (de_re),
     .de_out                 (href_post_1),
     .vesa_out_data          (rgb565_post_1),
-
-    .channel_index          (channel_index),
-    .angle_num              (angle_num),
-    .scale_num              (scale_num),
 
     .axi_awaddr             (axi_awaddr     ),
     .axi_awid               (axi_awuser_id  ),
@@ -445,12 +440,12 @@ image_global multi_image_load(
 //
 // 用于 HDMI_out 的像素数据、行场同步信号数据
 always@(posedge pix_clk_out) begin
-    r_out<={rgb888_o[23:16]};
-    g_out<={rgb888_o[15:8]};
-    b_out<={rgb888_o[7:0]}; 
-    vs_out<=vs_o;
-    hs_out<=hs_o;
-    de_out<=de_o;
+    r_out <= {rgb888_final[23:16]};
+    g_out <= {rgb888_final[15:8]};
+    b_out <= {rgb888_final[7:0]}; 
+    vs_out <= vsync_final;
+    hs_out <= hsync_final;
+    de_out <= href_final;
 end
 
 
@@ -458,10 +453,10 @@ end
 // 产生 HDMI_VESA 协议时序 
 sync_vg sync_vg(                            
     .clk            (pix_clk_out    ),      //input                   clk,                                 
-    .rstn           (init_done    ),        //input                   rstn,                            
-    .vs_out         (vsync_post_1    ),             //output reg              vs_out,                                                                                                                                      
-    .hs_out         (hsync_post_1    ),             //output reg              hs_out,            
-    .de_out         (href_1),                     //output reg              de_out, 
+    .rstn           (init_done      ),        //input                   rstn,                            
+    .vs_out         (vsync_post_1   ),             //output reg              vs_out,                                                                                                                                      
+    .hs_out         (hsync_post_1   ),             //output reg              hs_out,            
+    .de_out         (href_1         ),                     //output reg              de_out, 
     .de_re          (de_re          )    
 );
 
@@ -473,8 +468,8 @@ ethernet_character u_ethernet_character(
     .rst_n		            (sys_rst),
 
     .channel_index          (channel_index),
-    .angle_num              (angle_num),// 输入的角度数字，3位十进制
-    .scale_num              ('d0),// 输入的比例数字，高7位是整数部分，低4位是小数部分
+    .scale_value            (scale_value  ),            // 输入的比例数字，高7位是整数部分，低4位是小数部分
+    .angle_num              (angle_num    ),            // 输入的角度数字，3位十进制
 
     .video_clk	            (pix_clk_out),
     .video_vsync            (vsync_post_1  ),   
@@ -485,7 +480,7 @@ ethernet_character u_ethernet_character(
     .hdmi_hsync             (hsync_post_2),
     .hdmi_href              (href_post_2),
     .hdmi_data              (rgb888_post_2),
-
+   
     .rgmii_txd              (rgmii_txd   ),
     .rgmii_txctl            (rgmii_txctl ),
     .rgmii_txc              (rgmii_txc   ),
@@ -495,22 +490,23 @@ ethernet_character u_ethernet_character(
 );
 
 
-// 亮度色度处理
+//
+// 亮度、色相和灰阶调整
 image_adjust u_image_adjust(
-    .rst                    (sys_rst),
-    .sys_clk                (clk_50M),
-    .pclk                   (pix_clk_out),
-    .i_hs                   (hsync_post_2),
-    .i_vs                   (vsync_post_2),
-    .i_de                   (href_post_2),
-    .i_data                 (rgb888_post_2),
-    .command_flag           (command_in_flag),
-    .ctrl_command_in        (ctrl_command),
-    .value_command_in       (value_command),
-    .o_hs                   (hs_o),
-    .o_vs                   (vs_o),
-    .o_de                   (de_o),
-    .o_data                 (rgb888_o)
+    .sys_clk            (clk_50M),
+    .rst_n              (sys_rst),       
+    .pclk               (pix_clk_out),          
+    .i_hs               (hsync_post_2),        
+    .i_vs               (vsync_post_2),        
+    .i_de               (href_post_2),	     
+    .i_data             (rgb888_post_2),  
+    .command_flag       (command_in_flag),    // 作为亮度加减的标志信号
+    .ctrl_command_in    (ctrl_command), 
+    .value_command_in   (value_command),    
+    .o_hs               (hsync_final),        
+    .o_vs               (vsync_final),        
+    .o_de               (href_final),        
+    .o_data             (rgb888_final)       
 );
 
 
@@ -589,22 +585,29 @@ ddr u_ddr (
 );
 
 
-//
-// 心跳信号 
-always@(posedge core_clk) begin
-    if (!ddr_init_done)
-        cnt <= 27'd0;
-    else if ( cnt >= TH_1S )
-        cnt <= 27'd0;
-    else
-        cnt <= cnt + 27'd1;
+// 初始化的信号使 LED 亮起
+always @(posedge clk_50M or negedge sys_rst) begin
+    if(!sys_rst) begin
+        hardware_init_done <= 'b0;
     end
+    else if((ddr_init_done == 1'b1) && (hdmi_init_done == 1'b1) && (cmos_init_done == 2'b11)) begin
+        hardware_init_done <= 1'b1;
+    end
+    else begin
+        hardware_init_done <= hardware_init_done;
+    end
+end
 
-always @(posedge core_clk)begin
-    if (!ddr_init_done)
-        heart_beat_led <= 1'd1;
-    else if ( cnt >= TH_1S )
-        heart_beat_led <= ~heart_beat_led;
+always @(posedge clk_50M or negedge sys_rst) begin
+    if(!sys_rst) begin
+        process_init_done <= 'b0;
+    end
+    else if(init_done) begin
+        process_init_done <= 1'b1;
+    end
+    else begin
+        process_init_done <= process_init_done;
+    end
 end
                  
 

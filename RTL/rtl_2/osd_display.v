@@ -10,7 +10,7 @@ parameter color_char  = 24'hff0000       //更改字符颜色
 	input                       pclk,
 	input[23:0]                 wave_color,
 	input                       adc_clk,
-	input                       adc_buf_wr,
+	input                        adc_buf_wr,
 	input[11:0]                 adc_buf_addr,
 	input[7:0]                  adc_buf_data,
 	input                       i_hs,    
@@ -24,8 +24,8 @@ parameter color_char  = 24'hff0000       //更改字符颜色
     output [10:0]               ram_addr,
     input  [2:0]                channel_index,
     input [7:0]                 i_data_char,
-    input [8:0]                 angle,     // 输入的角度数字，3位十进制
-    input [10:0]                proportion, // 输入的比例数字，高7位是整数部分，低4位是小数部分
+    input [8:0]                 angle_num,     	// 输入的角度数字，3位十进制
+    input [10:0]                scale_value, 	// 输入的比例数字，高7位是整数部分，低4位是小数部分
     input                       udp_rec_data_valid
 );
 
@@ -181,11 +181,11 @@ reg        region_active9_d1;
 reg        region_active9_d2;
 
 
-assign baiwei=angle/100;
-assign shiwei=(angle-baiwei*7'd100)/10;
-assign gewei=angle%10;
-assign shiwei1=proportion[10:4]/10;
-assign gewei1=proportion[3:0]%10;
+assign baiwei=angle_num/100;
+assign shiwei=(angle_num-baiwei*7'd100)/10;
+assign gewei=angle_num%10;
+assign shiwei1=scale_value[10:4]/10;
+assign gewei1=scale_value[3:0]%10;
 assign o_data = v_data;
 assign o_hs = pos_hs;
 assign o_vs = pos_vs;
@@ -485,7 +485,7 @@ always @(*)begin
     else if(region_active8 == 1'b1&&pos_x>=x_start8+12'd32&&pos_x<=x_start8+12'd39)
         osd_ram_addr3_reg = osd_ram_addr3[12:3]+4'd10*7'd66-(pos_y-y_start8)*3'd6-3'd4;
     else if(region_active8 == 1'b1&&pos_x>=x_start8+12'd40&&pos_x<=x_start8+12'd55)
-        osd_ram_addr3_reg = osd_ram_addr3[12:3]+proportion[3:0]*7'd66-(pos_y-y_start8)*3'd5-3'd5;
+        osd_ram_addr3_reg = osd_ram_addr3[12:3]+scale_value[3:0]*7'd66-(pos_y-y_start8)*3'd5-3'd5;
 
     else
         osd_ram_addr3_reg = osd_ram_addr3_reg;

@@ -32,20 +32,17 @@ module ddr_rd_buf #(
 )(
     input                           clk             ,
     input                           rst             ,
-
+    input   [3:0]                   rotate_mode     ,
+    input   [3:0]                   mirror_mode     ,
     input                           buf_wr_en       /*synthesis PAP_MARK_DEBUG="1"*/,
     input       [DQ_WIDTH*8-1:0]    buf_wr_data     ,
     output reg                      frame_instruct  ,
-
-    input       [3:0]               ctrl_command_in ,
-    input       [3:0]               value_command_in,
-    input                           command_flag    ,
-
+     
     input                           rd_clk          ,
     input                           rd_rst          ,
     input                           rd_en           ,
     input                           rd_fsync        ,
-    output reg                      de_o            ,
+    output reg                      de_o           /*synthesis PAP_MARK_DEBUG="1"*/ ,
     output      [15:0]              rgb565_out    /*synthesis PAP_MARK_DEBUG="1"*/
 );
 
@@ -54,13 +51,14 @@ parameter HEIGHT_QD = H_HEIGHT / 4;
 parameter WIDTH_TC = (H_WIDTH / 4) * 3;
 parameter HEIGHT_TC = (H_HEIGHT / 4) * 3;
 
-wire                nege_href       ;
-wire                pose_vsync      ;
-wire [15:0]         rd_data_fifo    ;
-wire                rd_data_final   ;
+wire                nege_href       /*synthesis PAP_MARK_DEBUG="1"*/;
+wire                pose_vsync      /*synthesis PAP_MARK_DEBUG="1"*/;
+wire [15:0]         rd_data_fifo    /*synthesis PAP_MARK_DEBUG="1"*/;
+wire [15:0]         rd_data_final     /*synthesis PAP_MARK_DEBUG="1"*/;
+wire [15:0]         rd_data_ram     /*synthesis PAP_MARK_DEBUG="1"*/;
 
-reg [3:0]           rotate_mode     ;
-reg [3:0]           mirror_mode     ;
+reg                 fifo_wr_en      ;
+reg                 ram_wr_en       ;
 reg                 rd_fsync_d1     ;
 reg                 rd_fsync_d2     ;
 reg [2:0]           frame_count     ;
@@ -68,35 +66,12 @@ reg                 rd_en_d1        ;
 reg                 rd_en_d2        ;
 reg [10:0]          row_count       /*synthesis PAP_MARK_DEBUG="1"*/;
 reg [19:0]          pix_count       ;
-reg [5:0]           wr_addr         ;
-reg [9:0]           rd_addr         ;
+reg [5:0]           wr_addr        /*synthesis PAP_MARK_DEBUG="1"*/ ;
+reg [9:0]           rd_addr        /*synthesis PAP_MARK_DEBUG="1"*/ ;
 
-
-// 模式控制
-always @(posedge clk or negedge rst) begin
-    if(!rst) begin
-        rotate_mode <= 'b0;
-        mirror_mode <= 'b0;
-    end
-    else if((ctrl_command_in == 4'b0100) && (command_flag == 1'b1)) begin
-        if (value_command_in == 'd2) begin   //切换到水平镜像时，先旋转180°
-            mirror_mode <= 4'd2; 
-            rotate_mode <= 4'd1;
-        end
-        else if (value_command_in == 4'd0) begin
-            mirror_mode <= 4'd0;
-            rotate_mode <= 4'd0;            
-        end
-        else begin
-            mirror_mode <= value_command_in;
-            rotate_mode <= rotate_mode;
-        end
-    end
-    else begin
-        mirror_mode <= mirror_mode;
-        rotate_mode <= rotate_mode;        
-    end
-end
+assign rd_data_final = (((rotate_mode == 'd1 || mirror_mode == 'd1) && (mirror_mode != 'd2)) 
+                        && row_count >= 'd180) ? rd_data_ram : rd_data_fifo;
+assign rgb565_out = ((pix_count >= WIDTH_TC) && (row_count >= HEIGHT_QD)) ? 16'd0 : rd_data_final;
 
 
 // 帧指示信号
@@ -145,7 +120,7 @@ always @(posedge clk or negedge rst) begin
 end
 
 
-// 正向存储
+// 正向读取 FIFO
 fifo_rd_buf rd_buf(
     .wr_clk         (clk),                // input
     .wr_rst         ((~rst) || (pose_vsync) || (nege_href)),                // input
@@ -161,33 +136,27 @@ fifo_rd_buf rd_buf(
     .almost_empty   ()     // output
 );
 
-// 数据信号
-assign rgb565_out = ((pix_count >= WIDTH_TC) && (row_count >= HEIGHT_QD)) ? 16'd0 : rd_data_final;
 
-
-// 反向存储
+// 反向存储 RAM
 ram_rd_buf  reverse_rd_buf(
-  .wr_data      (buf_wr_data),    // input [255:0]
-  .wr_addr      (wr_addr),    // input [5:0]
-  .wr_en        (buf_wr_en),        // input
-  .wr_clk       (clk),      // input
-  .wr_rst       ((~rst) || (pose_vsync) || (nege_href)),      // input
-  .rd_addr      (rd_addr),    // input [9:0]
-  .rd_data      (rd_data_ram),    // output [15:0]
-  .rd_clk       (rd_clk),      // input
-  .rd_rst       ((~rst) || (pose_vsync) || (nege_href))       // input
+  .wr_data          (buf_wr_data),    // input [255:0]
+  .wr_addr          (wr_addr),    // input [5:0]
+  .wr_en            (buf_wr_en),        // input
+  .wr_clk           (clk),      // input
+  .wr_rst           ((~rst) || (pose_vsync) || (nege_href)),      // input
+  .rd_addr          (rd_addr),    // input [9:0]
+  .rd_data          (rd_data_ram),    // output [15:0]
+  .rd_clk           (rd_clk),      // input
+  .rd_rst           ((~rst) || (pose_vsync) || (nege_href))       // input
 );
 
 
-// 反向存储的内部连线
-assign rd_data_final = (((rotate_mode == 4'd1 || mirror_mode == 4'd1) &&(mirror_mode != 'd2))
-                        && (row_count >= 'd180)) ? rd_data_ram : rd_data_fifo;
-
+// 反向存储 RAM 操作
 always @(posedge clk or negedge rst) begin
-    if(!rst) begin
+    if (!rst) begin
         wr_addr <= 'd0;
     end
-    else if((pose_vsync) || (nege_href)) begin   //每次写入一行前写地址清零
+    else if((pose_vsync) || (nege_href)) begin   // 每次写入一行前写地址清零
         wr_addr <= 'd0;
     end
     else if(buf_wr_en) begin
@@ -203,9 +172,9 @@ always @(posedge rd_clk or negedge rst) begin
         rd_addr <= 'd0;
     end
     else if((pose_vsync) || (nege_href)) begin //读一行之前地址跳到959
-        rd_addr <= WIDTH_TC - 1'b1 ;
+        rd_addr <= 'd960 - 1'b1 ;
     end
-    else if(rd_en == 1'b1) begin
+    else if(rd_en) begin
         rd_addr <= rd_addr - 1'b1 ;
     end
     else begin

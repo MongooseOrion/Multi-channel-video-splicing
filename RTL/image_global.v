@@ -23,25 +23,29 @@
 * FILE ENCODER TYPE: GBK
 * ========================================================================
 */
-// 全画面缓存模块
+// 图像数据输入输出
 // 
 module image_global#(
-    parameter                     MEM_ROW_WIDTH        = 15    ,
-    parameter                     MEM_COLUMN_WIDTH     = 10    ,
-    parameter                     MEM_BANK_WIDTH       = 3     ,
-    parameter                     CTRL_ADDR_WIDTH = MEM_ROW_WIDTH + MEM_BANK_WIDTH + MEM_COLUMN_WIDTH,
-    parameter                     MEM_DQ_WIDTH         = 32    ,
-    parameter M_ADDR_WIDTH      = 5'd5             // buf 读通道位宽
+    parameter       MEM_ROW_WIDTH        = 15    ,
+    parameter       MEM_COLUMN_WIDTH     = 10    ,
+    parameter       MEM_BANK_WIDTH       = 3     ,
+    parameter       CTRL_ADDR_WIDTH = MEM_ROW_WIDTH + MEM_BANK_WIDTH + MEM_COLUMN_WIDTH,
+    parameter       MEM_DQ_WIDTH         = 32    
 )(
+    input               sys_clk                      ,
     input               ddr_clk                     /*synthesis PAP_MARK_DEBUG="1"*/,
-    input               sys_clk                     ,
     input               sys_rst                     ,
     input               ddr_init                    /*synthesis PAP_MARK_DEBUG="1"*/,
     input       [3:0]   ctrl_command_in             ,
     input       [3:0]   value_command_in            ,
-    input               command_flag                ,
+    input               command_flag               ,
+
+    // 字符显示需要的信息
+    output reg  [2:0]   channel_index               ,
+    output reg  [8:0]   angle_num                   ,
+    output reg  [10:0]  scale_value                 ,
     
-    // 视频流输入
+    // 图像数据输入
     input               cmos1_pclk                  ,
     input               cmos1_href                  ,
     input               cmos1_vsync                 ,
@@ -59,17 +63,12 @@ module image_global#(
     input               hdmi_vsync                  ,
     input       [15:0]  hdmi_pix_data               ,
 
-    // 取数据 RAM 所需的同步信号
+    // 最终产生的 HDMI 时序用于同步
     input                           vesa_out_clk    ,
     input                           vesa_out_vsync  ,
     input                           vesa_out_de     /*synthesis PAP_MARK_DEBUG="1"*/ ,
     output [15:0]                   vesa_out_data   /*synthesis PAP_MARK_DEBUG="1"*/,
     output                          de_out          /*synthesis PAP_MARK_DEBUG="1"*/,
-
-    // 显示字符数据
-    output reg      [2:0]           channel_index   ,
-    output reg      [8:0]           angle_num       ,
-    output reg      [10:0]          scale_num       ,   
     
     // AXI 总线
     output [CTRL_ADDR_WIDTH-1:0]    axi_awaddr      /*synthesis PAP_MARK_DEBUG="1"*/,
@@ -104,12 +103,6 @@ module image_global#(
     output                          init_done /*synthesis PAP_MARK_DEBUG="1"*/
 );
 
-// 聚焦视图切换代码
-parameter   CAM_1 = 4'b0001,
-            CAM_2 = 4'b0010,
-            CAM_FUSION = 4'b0011,
-            HDMI = 4'b0100;
-
 wire                            channel1_rd_en      ;
 wire                            channel1_rready     /* synthesis syn_keep = 1 */;
 wire [MEM_DQ_WIDTH*8-1'b1:0]    channel1_data       ;
@@ -137,9 +130,11 @@ reg         ultimate_clk_in     ;
 reg         ultimate_de_in      ;
 reg         ultimate_vs_in      ;
 reg [15:0]  ultimate_data_in    ;
+reg [3:0]   rotate_mode         ;
+reg [3:0]   mirror_mode         ;
 
 
-// 相机 1 1/16
+// 照相机 1 1/16
 video_sampling_1 #(
     .IMAGE_TAG          (4'd1),
     .SEL_MODE           (2'd1)
@@ -158,7 +153,7 @@ video_sampling_1 #(
 );
 
 
-// 相机 2 1/16
+// 照相机 2 1/16
 video_sampling_1 #(
     .IMAGE_TAG          (4'd2),
     .SEL_MODE           (2'd1)
@@ -177,7 +172,7 @@ video_sampling_1 #(
 );
 
 
-// 相机融合 1/16
+// 照相机融合视图 1/16
 video_sampling_1 #(
     .IMAGE_TAG          (4'd3),
     .SEL_MODE           (2'd1)
@@ -215,19 +210,44 @@ video_sampling_1 #(
 );
 
 
-// 聚焦视图 9/16
+// 旋转、翻转模式控制
+always @(posedge sys_clk or negedge sys_rst) begin
+    if(!sys_rst) begin
+        mirror_mode <= 'd0; 
+        rotate_mode <= 'd0;
+    end
+    else if(ctrl_command_in == 4'b0011 && command_flag == 1'b1) begin
+        rotate_mode <= value_command_in;
+    end
+    else if(ctrl_command_in == 4'b0100 && command_flag == 1'b1) begin
+        if (value_command_in == 'd2) begin   //切换到水平镜像时，先旋转180°
+            mirror_mode <= 4'd2; 
+            rotate_mode <= 4'd1;
+        end
+        else if (value_command_in == 'd0) begin
+            mirror_mode <= 4'd0;
+            rotate_mode <= 4'd0;            
+        end
+        else begin
+            mirror_mode <= value_command_in;
+            rotate_mode <= rotate_mode;
+        end
+    end
+    else begin
+        mirror_mode <= mirror_mode;
+        rotate_mode <= rotate_mode;        
+    end
+end
+
+
+// 输出图像 9/16
 // 960*560
 always @(posedge sys_clk or negedge sys_rst) begin
     if(!sys_rst) begin
         reg_value_command <= 'b0;
     end
-    else if((ctrl_command_in == 4'b1111) && (command_flag == 1'b1)) begin
-        if(value_command_in == 4'b0) begin
-            reg_value_command <= reg_value_command;
-        end
-        else begin
-            reg_value_command <= value_command_in;
-        end
+    else if(ctrl_command_in == 4'b1111 && command_flag == 1'b1) begin
+        reg_value_command <= value_command_in;
     end
     else begin
         reg_value_command <= reg_value_command;
@@ -278,9 +298,6 @@ video_sampling_2 #(
 )video_sampling_ultimate (
     .clk                (ultimate_clk_in    ),
     .rst                (sys_rst            ),
-    //.ctrl_command_in    (ctrl_command_in    ),
-    //.value_command_in   (value_command_in   ),
-    //.command_valid      (command_flag       ),
     .vs_in              (ultimate_vs_in     ),
     .de_in              (ultimate_de_in     ),
     .rgb565_in          (ultimate_data_in   ),
@@ -293,7 +310,7 @@ video_sampling_2 #(
 );
 
 
-// 上述内容循环仲裁从 AXI 写入 DDR
+// 数据经过 AXI 总线写入 DDR
 axi_interconnect_wr u_axi_interconnect_wr(
     .clk                            (ddr_clk            ),
     .rst                            (ddr_init           ),
@@ -345,7 +362,7 @@ axi_interconnect_wr u_axi_interconnect_wr(
 );
 
 
-// 从 DDR 读出给 buffer，以便 HDMI 显示
+// 数据经过 AXI 读取出 DDR
 axi_interconnect_rd u_axi_interconnect_rd(
     .clk                        (ddr_clk        ),
     .rst                        (ddr_init       ),
@@ -353,11 +370,9 @@ axi_interconnect_rd u_axi_interconnect_rd(
     .hdmi_vsync                 (vesa_out_vsync ),
     .hdmi_href                  (vesa_out_de    ),
     .frame_instruct             (frame_instruct ),
-    .buf_wr_data                (buf_wr_data),
-    .buf_wr_en                  (buf_wr_en),
-    .value_command_in           (value_command_in),
-    .ctrl_command_in            (ctrl_command_in),
-    .command_flag               (command_flag),
+    .buf_wr_data                (buf_wr_data ),
+    .buf_wr_en                  (buf_wr_en   ),
+    .rotate_mode                (rotate_mode ),
 
     .axi_arvalid                (axi_arvalid ),
     .axi_arready                (axi_arready ),
@@ -374,15 +389,14 @@ axi_interconnect_rd u_axi_interconnect_rd(
 ); 
 
 
-// 输出数据缓存 buf
+// 读缓冲 buf
 ddr_rd_buf u_ddr_rd_buf(
-    .clk                        (ddr_clk        ), 
-    .rst                        (ddr_init       ),  
+    .clk                        (ddr_clk        ),
+    .rst                        (ddr_init       ),
+    .rotate_mode                (rotate_mode    ), 
+    .mirror_mode                (mirror_mode    ),
+  
     .frame_instruct             (frame_instruct ), 
-    .value_command_in           (value_command_in),
-    .ctrl_command_in            (ctrl_command_in),
-    .command_flag               (command_flag),
-
     .buf_wr_en                  (buf_wr_en      ),
     .buf_wr_data                (buf_wr_data    ),
     .rd_clk                     (vesa_out_clk   ), 
@@ -394,13 +408,17 @@ ddr_rd_buf u_ddr_rd_buf(
 );
 
 
-// 显示数据赋值
+// 输出字符显示需要的信息
+// 显示视频信号
 always @(posedge sys_clk or negedge sys_rst) begin
     if(!sys_rst) begin
         channel_index <= 'b0;
     end
+    else if(reg_value_command == 4'd0) begin
+        channel_index <= 3'd1;
+    end
     else begin
-        channel_index <= reg_value_command;
+        channel_index <= reg_value_command[2:0];
     end
 end
 
@@ -408,11 +426,11 @@ always @(posedge sys_clk or negedge sys_rst) begin
     if(!sys_rst) begin
         angle_num <= 'b0;
     end
-    else if((ctrl_command_in == 4'b0011) && (value_command_in == 4'b0001)) begin
-        angle_num <= 9'd180;
+    else if(rotate_mode == 4'd1) begin
+        angle_num <= 'd180;
     end
-    else if((ctrl_command_in == 4'b0011) && (value_command_in == 4'd0)) begin
-        angle_num <= 9'd0;
+    else if(rotate_mode == 4'd0) begin
+        angle_num <= 'd0;
     end
     else begin
         angle_num <= angle_num;
@@ -421,11 +439,12 @@ end
 
 always @(posedge sys_clk or negedge sys_rst) begin
     if(!sys_rst) begin
-        scale_num <= 'b0;
+        scale_value <= 'b0;
     end
     else begin
-        scale_num <= scale_num;
+        scale_value <= scale_value;
     end
 end
+
 
 endmodule

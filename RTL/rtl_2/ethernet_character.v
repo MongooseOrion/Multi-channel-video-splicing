@@ -33,14 +33,17 @@ module ethernet_character(
     input  						video_vsync	    ,
     input						video_hsync	    ,
     input   					video_href      ,
-    input 		[15:0]			video_data_in   ,
+    input [15:0]			    video_data_in   ,
+    input [3:0]                 ctrl_command_in ,
+    input [3:0]                 value_command_in,
+    input                       command_flag    ,
 
-    // 输入数据
-    input       [2:0]           channel_index   ,
-    input       [8:0]           angle_num       ,
-    input       [10:0]          scale_num       ,           
+    // 输入的信息
+    input [2:0]                 channel_index,
+    input [8:0]                 angle_num,              // 输入的角度数字，3位十进制
+    input [10:0]                scale_value,            // 输入的比例数字，高7位是整数部分，低4位是小数部分
 
-    // HDMI 图像信号输出
+    // HDMI 图像信号
     output  					hdmi_vsync      ,
     output  					hdmi_hsync      ,
     output  					hdmi_href       ,
@@ -55,7 +58,6 @@ module ethernet_character(
 );
 
 wire [23:0]                     i_data;
-
 wire                            osd_hs;
 wire                            osd_vs;
 wire                            osd_de;
@@ -87,17 +89,17 @@ osd_display #(
     .i_hs                  (video_hsync                 ),
     .i_vs                  (video_vsync                 ),
     .i_de                  (video_href                  ),
-    .i_data                (i_data  				),
+    .i_data                (i_data  	    			),
     .o_hs                  (osd_hs                      ),
     .o_vs                  (osd_vs                      ),
     .o_de                  (osd_de                      ),
     .o_data                (osd_data                    ),
     .ram_addr              (udp_rec_ram_read_addr       ), //output，输出读取ram的地址
     .udp_rec_data_valid    (udp_rec_data_valid          ),
-    .channel_index         (channel_index               ), //当前使用的通道
+    .channel_index         (channel_index                          ), //当前使用的通道
     .i_data_char           (udp_rec_ram_rdata           ),                            
-    .angle                 (angle_num                   ),     //总共9位，输入的角度值，3位十进制              
-    .proportion            (scale_num                   )      //总共11位，输入的比例值，高7位是整数部分，低4位是小数部分 
+    .angle_num             (angle_num                       ),     //总共9位，输入的角度值，3位十进制              
+    .scale_value           (scale_value             )      //总共11位，输入的比例值，高7位是整数部分，低4位是小数部分 
 );
 
 

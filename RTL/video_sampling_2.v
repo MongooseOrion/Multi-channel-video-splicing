@@ -36,9 +36,11 @@ module video_sampling_2 #(
     input               clk,
     input               rst,
     // 信号输入
-    input               de_in       /*synthesis PAP_MARK_DEBUG="1"*/ ,
-    input               vs_in        /*synthesis PAP_MARK_DEBUG="1"*/,
-    input       [15:0]  rgb565_in   ,
+    input               de_in               /*synthesis PAP_MARK_DEBUG="1"*/,
+    input               vs_in               /*synthesis PAP_MARK_DEBUG="1"*/,
+    input       [15:0]  rgb565_in           ,
+    input       [3:0]   ctrl_command_in     ,
+    input       [3:0]   value_command_in    ,
     // 发往 DDR 存储
     input                                   rd_clk          ,
     output      [DQ_WIDTH*8-1'b1:0]         rd_data         ,
@@ -60,13 +62,13 @@ wire        almost_full;
 
 reg                             vs_in_d1        ; 
 reg                             de_in_d1        ; 
-reg [10:0]                      href_count       /*synthesis PAP_MARK_DEBUG="1"*/; 
-reg [3:0]                       pix_count        /*synthesis PAP_MARK_DEBUG="1"*/;
-reg                             wr_en_tr       /*synthesis PAP_MARK_DEBUG="1"*/ ;     
+reg [10:0]                      href_count      /*synthesis PAP_MARK_DEBUG="1"*/; 
+reg [3:0]                       pix_count       /*synthesis PAP_MARK_DEBUG="1"*/;
+reg                             wr_en_tr        /*synthesis PAP_MARK_DEBUG="1"*/ ;     
 reg [15:0]                      wr_data_temp    ;
 reg [15:0]                      wr_data         /*synthesis PAP_MARK_DEBUG="1"*/;
 reg [10:0]                      row_pix_count;
-reg                             pre_en /*synthesis PAP_MARK_DEBUG="1"*/;
+reg                             pre_en          /*synthesis PAP_MARK_DEBUG="1"*/;
 
 
 // 写入有效的像素个数计数
