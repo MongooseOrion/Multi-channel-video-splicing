@@ -16,12 +16,12 @@
 | 支持的图像处理操作 | 亮度调整、色相调整、灰阶显示 |
 | HDMI输出分辨率 | $1280\times 720$ |
 | 支持的HDMI输出帧率 | 30, 60 |
-| 串口控制 | 8位 |
+| 串口控制 | 8 位 |
 | 字符显示 | 固化字符/网络传输 |
 
 
 开发平台：
-  * 紫光同创 PGL50H-6FBG484，拥有 32bit 输入位宽，通过一组 AXI 接口输入；
+  * 紫光同创 PGL50H-6FBG484，DDR 拥有 32bit 输入位宽，仅支持通过一组 AXI 接口输入；
 
 ## 仓库目录
 
@@ -198,3 +198,7 @@ rd_addr <= scale_value*x_cnt + scale_value*VIDEO_WIDTH*y_cnt;
 ## 资源使用量
 
 <div align = 'center'><image src = './Document\pic\屏幕截图 2023-11-17 124110.png' height = 650 title = '资源使用量'></div>
+
+## 实际效果
+
+你可以点击[此处](https://www.bilibili.com/video/BV17C4y1m7Rr/)前往 bilibili 视频网观看相关的演示视频。
