@@ -197,3 +197,4 @@ rd_addr <= scale_value*x_cnt + scale_value*VIDEO_WIDTH*y_cnt;
 
 ## 资源使用量
 
+<div align = 'center'><image src = './Document\pic\屏幕截图 2023-11-17 124110.png' height = 650 title = '资源使用量'></div>
