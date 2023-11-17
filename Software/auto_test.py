@@ -28,8 +28,6 @@ input_value = [0xF1,0xF2,0xf3,0xf4,0x2a,0x29,0x28,0x27,0x26,0x24,0x23,0x22,0x21,
 
 # 设置要发送的8位数据
 for i in range(32):
-    print("请直接输入需要执行的命令：\n")
-    print("支持的命令包括：\n")
     data_to_send = input_value[i]
     send_data(serial_port, data_to_send)
     time.sleep(3)
