@@ -43,8 +43,8 @@ module ddr_rd_buf #(
     input                           rd_rst          ,
     input                           rd_en           ,
     input                           rd_fsync        ,
-    output reg                      de_o           /*synthesis PAP_MARK_DEBUG="1"*/ ,
-    output      [15:0]              rgb565_out    /*synthesis PAP_MARK_DEBUG="1"*/
+    output reg                      de_o            /*synthesis PAP_MARK_DEBUG="1"*/ ,
+    output      [15:0]              rgb565_out      /*synthesis PAP_MARK_DEBUG="1"*/
 );
 
 parameter WIDTH_QD = H_WIDTH / 4;
@@ -55,7 +55,7 @@ parameter HEIGHT_TC = (H_HEIGHT / 4) * 3;
 wire                nege_href       /*synthesis PAP_MARK_DEBUG="1"*/;
 wire                pose_vsync      /*synthesis PAP_MARK_DEBUG="1"*/;
 wire [15:0]         rd_data_fifo    /*synthesis PAP_MARK_DEBUG="1"*/;
-wire [15:0]         rd_data_final     /*synthesis PAP_MARK_DEBUG="1"*/;
+wire [15:0]         rd_data_final   /*synthesis PAP_MARK_DEBUG="1"*/;
 wire [15:0]         rd_data_ram     /*synthesis PAP_MARK_DEBUG="1"*/;
 
 reg                 fifo_wr_en      ;
@@ -125,32 +125,32 @@ end
 
 // 正向读取 FIFO
 fifo_rd_buf rd_buf(
-    .wr_clk         (clk),                // input
-    .wr_rst         ((~rst) || (pose_vsync) || (nege_href)),                // input
-    .wr_en          (buf_wr_en),                  // input
-    .wr_data        (buf_wr_data),              // input [255:0]
-    .wr_full        (),              // output
-    .almost_full    (),      // output
-    .rd_clk         (rd_clk),                // input
-    .rd_rst         ((~rst) || (pose_vsync) || (nege_href)),                // input,每一行读完后，fifo复位
-    .rd_en          (rd_en),                  // input
-    .rd_data        (rd_data_fifo),              // output [15:0]
-    .rd_empty       (),            // output
-    .almost_empty   ()     // output
+    .wr_clk         (clk            ),             
+    .wr_rst         ((~rst) || (pose_vsync) || (nege_href)  ),              
+    .wr_en          (buf_wr_en      ),                 
+    .wr_data        (buf_wr_data    ),             
+    .wr_full        (),             
+    .almost_full    (),      
+    .rd_clk         (rd_clk         ),               
+    .rd_rst         ((~rst) || (pose_vsync) || (nege_href)),    // 每一行读完后，fifo复位
+    .rd_en          (rd_en          ),              
+    .rd_data        (rd_data_fifo   ),             
+    .rd_empty       (),           
+    .almost_empty   ()   
 );
 
 
 // 反向存储 RAM
 ram_rd_buf  reverse_rd_buf(
-  .wr_data          (buf_wr_data),    // input [255:0]
-  .wr_addr          (wr_addr),    // input [5:0]
-  .wr_en            (buf_wr_en),        // input
-  .wr_clk           (clk),      // input
-  .wr_rst           ((~rst) || (pose_vsync) || (nege_href)),      // input
-  .rd_addr          (rd_addr),    // input [9:0]
-  .rd_data          (rd_data_ram),    // output [15:0]
-  .rd_clk           (rd_clk),      // input
-  .rd_rst           ((~rst) || (pose_vsync) || (nege_href))       // input
+  .wr_data          (buf_wr_data    ),  
+  .wr_addr          (wr_addr        ),   
+  .wr_en            (buf_wr_en      ),     
+  .wr_clk           (clk            ),     
+  .wr_rst           ((~rst) || (pose_vsync) || (nege_href)),   
+  .rd_addr          (rd_addr        ),  
+  .rd_data          (rd_data_ram    ),    
+  .rd_clk           (rd_clk         ),     
+  .rd_rst           ((~rst) || (pose_vsync) || (nege_href))   
 );
 
 

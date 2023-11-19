@@ -1,3 +1,30 @@
+/* =======================================================================
+* Copyright (c) 2023, MongooseOrion.
+* All rights reserved.
+*
+* The following code snippet may contain portions that are derived from
+* OPEN-SOURCE communities, and these portions will be licensed with: 
+*
+* <NULL>
+*
+* If there is no OPEN-SOURCE licenses are listed, it indicates none of
+* content in this Code document is sourced from OPEN-SOURCE communities. 
+*
+* In this case, the document is protected by copyright, and any use of
+* all or part of its content by individuals, organizations, or companies
+* without authorization is prohibited, unless the project repository
+* associated with this document has added relevant OPEN-SOURCE licenses
+* by github.com/MongooseOrion. 
+*
+* Please make sure using the content of this document in accordance with 
+* the respective OPEN-SOURCE licenses. 
+* 
+* THIS CODE IS PROVIDED BY https://github.com/MongooseOrion. 
+* FILE ENCODER TYPE: GBK
+* ========================================================================
+*/
+// 视频数据后处理，亮度、色相、灰阶
+//
 module image_adjust #(
 	parameter OSD_WIDTH   =  12'd960,
     parameter OSD_HEGIHT  =  12'd540,

@@ -421,18 +421,18 @@ assign wr_data = (wr_en_add_pre) ? 'd0 : rgb565_in ;
 
 // 使用 fifo 存储满足两次突发长度的数据，almost_full 为标志信号
 fifo_wr_buf axi_wr_buf(
-    .wr_clk         (clk),                // input
-    .wr_rst         ((~rst) || (pose_vs_in)),                // input
-    .wr_en          (wr_en_final || wr_en_add),                  // input
-    .wr_data        (wr_data),              // input [15:0]
-    .wr_full        (burst_emergency),              // output
-    .almost_full    (almost_full),      // output
-    .rd_clk         (rd_clk),                // input
-    .rd_rst         ((~rst) || (pose_vs_in)),                // input
-    .rd_en          ((rd_en) || (pre_en)),                  // input
-    .rd_data        (rd_data),              // output [255:0]
-    .rd_empty       (),            // output
-    .almost_empty   ()     // output
+    .wr_clk         (clk                    ),      
+    .wr_rst         ((~rst) || (pose_vs_in) ),      
+    .wr_en          ((wr_en_final) || (wr_en_add)), 
+    .wr_data        (wr_data                ),      
+    .wr_full        (burst_emergency        ),      
+    .almost_full    (almost_full            ),      
+    .rd_clk         (rd_clk                 ),      
+    .rd_rst         ((~rst) || (pose_vs_in) ),      
+    .rd_en          ((rd_en) || (pre_en)    ),      
+    .rd_data        (rd_data                ),      
+    .rd_empty       (),           
+    .almost_empty   ()     
 );
 
 
