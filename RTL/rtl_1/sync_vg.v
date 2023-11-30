@@ -153,7 +153,7 @@ module sync_vg # (
             x_act <= `UD 'd0;
         else 
         begin
-        /* X coords ¡§C for a backend pattern generator */
+        /* X coords ?¡ìC for a backend pattern generator */
             if(h_count > (H_SYNC + H_BP - 1'b1))
                 x_act <= `UD (h_count - (H_SYNC + H_BP));
             else
@@ -167,7 +167,7 @@ module sync_vg # (
             y_act <= `UD 'd0;
         else 
         begin
-            /* Y coords ¡§C for a backend pattern generator */
+            /* Y coords ?¡ìC for a backend pattern generator */
             if(v_count > (V_SYNC + V_BP - 1'b1))
                 y_act <= `UD (v_count - (V_SYNC + V_BP));
             else
