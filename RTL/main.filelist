@@ -6,7 +6,6 @@ fpga_top.v
 hdmi_data_in.v
 image_adjust.v
 image_global.v
-image_process.v
 uart_rx.v
 uart_trans.v
 uart_tx.v
@@ -24,7 +23,6 @@ power_on_delay.v
 rd_buf.v
 rd_ctrl.v
 reg_config.v
-reg_config_1.v
 sync_vg.v
 wr_buf.v
 wr_cmd_trans.v
