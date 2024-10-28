@@ -202,7 +202,22 @@ rd_addr <= scale_value*x_cnt + scale_value*VIDEO_WIDTH*y_cnt;
 
 ## 资源使用量
 
-<div align = 'center'><image src = './Document\pic\屏幕截图 2023-11-17 124110.png' height = 650 title = '资源使用量'></div>
+| 逻辑资源类别 | 使用量 | 使用百分比 |
+| :--- | :---: | :---: |
+| FF（Flip-Flops） | 8738 | 14 |
+| LUT | 12279 | 29 | 
+| LUT-FF pairs | 4056 | 9 |
+| BRAM | 24 | 31 |
+| 分布式 RAM | 444 | 3 |
+| DLL（Delay Locked Loop）| 1 | 10 |
+| PLL（Phase Locked Loop）| 4 | 80 |
+| 算术运算单元（APM）| 1 | 2 |
+| 时钟缓冲器（RCKB） | 0 | 0 |
+| I/O Blocks Data | 28 | 44 |
+| I/O Blocks Register | 6 | 40 |
+| I/O Blocks Special | 135 | 62 |
+| I/O Logic | 169 | 43 |
+| 低压差稳压器（LDO） | 0 | 0 |
 
 ## 实际效果
 
